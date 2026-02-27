@@ -1987,6 +1987,10 @@ function loadState(){
 function saveState(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
 let state = loadState();
 
+if (!state.catalog || !state.catalog.clothingTypes) {
+  state = structuredClone(defaultState);
+  localStorage.setItem(LS_KEY, JSON.stringify(state));
+}
 /* =========================
    Comptabilité ventes + marge
 ========================= */
