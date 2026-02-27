@@ -1759,6 +1759,16 @@ z-index:9999;
             <label>Taxe entreprise (%)</label>
             <input id="corpTax" type="number" step="0.01" />
           </div>
+          <div class="field">
+            <label>Base URSSAF</label>
+            <select id="urssafBase">
+              <option value="GROSS">Chiffre d’affaires brut</option>
+              <option value="NET_AFTER_PLATFORM">Chiffre d’affaires encaissé (après frais plateforme)</option>
+            </select>
+            <div class="muted" style="margin-top:6px;">
+              Si la plateforme retire ses frais avant versement, choisis "encaissé". Sinon, choisis "brut".
+            </div>
+          </div>
         </div>
 
         <div class="sep"></div>
@@ -1794,7 +1804,7 @@ z-index:9999;
 
         <div class="sep"></div>
         <div class="muted">
-          Logique actuelle : taxe entreprise appliquée sur net après frais plateforme. Factures PRO : TVA calculée dans le document imprimable.
+          Logique : base URSSAF configurable (CA brut ou CA encaissé après frais plateforme). Factures PRO : TVA calculée dans le document imprimable.
         </div>
       </div>
     </section>
@@ -1809,6 +1819,10 @@ z-index:9999;
    Données & helpers
 ========================= */
 const LS_KEY = "secondhand_html_app_FINAL";
+// Cache locale (optionnel)
+let __cachedState = null;
+try{ __cachedState = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); }catch(e){}
+
 
 const GRADES = [
   { id: "A", label: "Grade A (comme neuf)" },
@@ -1942,6 +1956,8 @@ const defaultState = {
   settings: {
     platformFees: { MAGASIN: 0.0, WHATNOT: 0.08, VINTED: 0.0 },
     corporateTax: 0.30,
+    urssafBase: "NET_AFTER_PLATFORM", // "GROSS" ou "NET_AFTER_PLATFORM"
+
     seller: { name:"", address:"", siret:"", vat:"" }
   },
   catalog: {
@@ -1953,6 +1969,39 @@ const defaultState = {
   supplierOrders: [],       // {id,supplier,createdAt,expectedAt,tracking,status,notes,lines[]}
   fraisGeneraux: []         // {id,date,label,ttc,tvaRate,ht,tva}
 };
+
+function normalizeState(data){
+  const d = (data && typeof data === "object") ? data : {};
+
+  const base = structuredClone(defaultState);
+
+  // merge settings
+  const s = d.settings || {};
+  base.settings = {
+    ...base.settings,
+    ...s,
+    platformFees: { ...base.settings.platformFees, ...(s.platformFees||{}) },
+    seller: { ...base.settings.seller, ...(s.seller||{}) }
+  };
+
+  // merge catalog
+  const c = d.catalog || {};
+  base.catalog = {
+    ...base.catalog,
+    ...c,
+    clothingTypes: Array.isArray(c.clothingTypes) ? c.clothingTypes : base.catalog.clothingTypes,
+    brands: Array.isArray(c.brands) ? c.brands : base.catalog.brands
+  };
+
+  // ensure core collections
+  base.inventory = (d.inventory && typeof d.inventory === "object") ? d.inventory : {};
+  base.sales = Array.isArray(d.sales) ? d.sales : [];
+  base.supplierOrders = Array.isArray(d.supplierOrders) ? d.supplierOrders : [];
+  base.fraisGeneraux = Array.isArray(d.fraisGeneraux) ? d.fraisGeneraux : [];
+
+  return base;
+}
+
 
 function loadState(){
   try{
@@ -1984,39 +2033,12 @@ function loadState(){
     return structuredClone(defaultState);
   }
 }
-
-// Normalise un état chargé (Google/JSON) pour éviter les erreurs si des champs manquent
-function normalizeState(obj){
-  try{
-    const parsed = (obj && typeof obj === "object") ? obj : {};
-    const st = structuredClone(defaultState);
-
-    st.settings = {
-      ...defaultState.settings,
-      ...(parsed.settings || {}),
-      platformFees: { ...defaultState.settings.platformFees, ...((parsed.settings||{}).platformFees || {}) },
-      seller: { ...defaultState.settings.seller, ...((parsed.settings||{}).seller || {}) }
-    };
-
-    st.catalog = {
-      ...defaultState.catalog,
-      ...(parsed.catalog || {}),
-      clothingTypes: (parsed.catalog?.clothingTypes || defaultState.catalog.clothingTypes).slice(),
-      brands: (parsed.catalog?.brands || defaultState.catalog.brands).slice()
-    };
-
-    st.inventory = parsed.inventory && typeof parsed.inventory === "object" ? parsed.inventory : {};
-    st.sales = Array.isArray(parsed.sales) ? parsed.sales : [];
-    st.supplierOrders = Array.isArray(parsed.supplierOrders) ? parsed.supplierOrders : [];
-    st.fraisGeneraux = Array.isArray(parsed.fraisGeneraux) ? parsed.fraisGeneraux : [];
-
-    return st;
-  }catch(e){
-    return structuredClone(defaultState);
-  }
+function saveState(){
+  // Cache locale (utile si l’API est indisponible ou si tu ouvres le fichier en local file://)
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){}
+  // Sauvegarde distante (Google Sheets) si connecté
+  saveStateAsync();
 }
-
-function saveState(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
 let state = loadState();
 
 if (!state.catalog || !state.catalog.clothingTypes) {
@@ -2047,7 +2069,9 @@ function computeSaleTotals(sale){
   const netAfterPlatform = gross - platformFee;
 
   const corporateTaxRate = state.settings.corporateTax ?? 0;
-  const corporateTax = Math.max(0, netAfterPlatform) * corporateTaxRate;
+  const urssafBaseMode = state.settings.urssafBase || "NET_AFTER_PLATFORM";
+  const urssafBase = (urssafBaseMode === "GROSS") ? gross : netAfterPlatform;
+  const corporateTax = Math.max(0, urssafBase) * corporateTaxRate;
 
   const netAfterTax = netAfterPlatform - corporateTax;
 
@@ -2875,6 +2899,7 @@ function renderSettingsPanel(){
   $("feeWHATNOT").value = ((state.settings.platformFees.WHATNOT||0)*100).toFixed(2);
   $("feeVINTED").value  = ((state.settings.platformFees.VINTED||0)*100).toFixed(2);
   $("corpTax").value    = ((state.settings.corporateTax||0)*100).toFixed(2);
+  $("urssafBase").value = state.settings.urssafBase || "NET_AFTER_PLATFORM";
 
   $("sellerName").value = state.settings.seller?.name || "";
   $("sellerAddress").value = state.settings.seller?.address || "";
@@ -3123,7 +3148,9 @@ function hookEvents(){
       $("invType").value, $("invBrand").value, $("invSegment").value, $("invGrade").value,
       $("invQty").value, $("invMin").value, $("invBuyPrice").value
     );
-    renderAll();
+    // save then refresh UI immediately
+    saveState();
+    renderAll(); // includes renderStockPanel -> met à jour "Stock — Aperçu" sans changer d'onglet
   });
   $("btnAddType").addEventListener("click", ()=>{
     addCatalogItem("clothingTypes", $("newType").value);
@@ -3210,6 +3237,7 @@ function hookEvents(){
     state.settings.platformFees.WHATNOT = clamp01(Number($("feeWHATNOT").value)/100);
     state.settings.platformFees.VINTED  = clamp01(Number($("feeVINTED").value)/100);
     state.settings.corporateTax = clamp01(Number($("corpTax").value)/100);
+    state.settings.urssafBase = $("urssafBase").value || "NET_AFTER_PLATFORM";
 
     state.settings.seller = {
       name: $("sellerName").value || "",
@@ -3492,8 +3520,8 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     saveState();
-    renderInventoryList();
-  });
+    if(typeof renderInventoryList==="function"){renderInventoryList();}else if(typeof renderAll==="function"){renderAll();}
+});
 })();
 
 
@@ -3540,8 +3568,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     saveState();
     if(typeof renderInventoryList === "function"){
-      renderInventoryList();
-    }
+      if(typeof renderInventoryList==="function"){renderInventoryList();}else if(typeof renderAll==="function"){renderAll();}
+}
   }, true);
 })();
 
@@ -3586,7 +3614,11 @@ document.addEventListener("DOMContentLoaded", () => {
   // Forcer un refresh immédiat si on est déjà sur Stock
   setTimeout(() => {
     if(document.getElementById("panel-stock")?.style.display !== "none"){
-      window.renderInventoryList();
+      if(typeof window.renderInventoryList === "function"){
+        window.renderInventoryList();
+      }else if(typeof window.renderAll === "function"){
+        window.renderAll();
+      }
     }
   }, 50);
 })();
@@ -3626,7 +3658,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   setTimeout(() => {
     if(document.getElementById("panel-stock")?.style.display !== "none"){
-      window.renderInventoryList();
+      if(typeof window.renderInventoryList === "function"){
+        window.renderInventoryList();
+      }else if(typeof window.renderAll === "function"){
+        window.renderAll();
+      }
     }
   }, 50);
 })();
@@ -3670,7 +3706,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   setTimeout(() => {
     if(document.getElementById("panel-stock")?.style.display !== "none"){
-      window.renderInventoryList();
+      if(typeof window.renderInventoryList === "function"){
+        window.renderInventoryList();
+      }else if(typeof window.renderAll === "function"){
+        window.renderAll();
+      }
     }
   }, 50);
 })();
@@ -3713,13 +3753,30 @@ async function checkPassword(){
     }
     APP_PASSWORD = input;
     state = normalizeState(data);
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){}
     document.getElementById("loginScreen").style.display = "none";
     renderAll();
   }catch(e){
+    // Si l'API est bloquée (ex: ouverture en local file://) mais qu'on a un cache local, on laisse accéder.
+    if(__cachedState){
+      APP_PASSWORD = input; // garde le mdp pour la session (la sauvegarde distante peut échouer en local)
+      state = normalizeState(__cachedState);
+      document.getElementById("loginScreen").style.display = "none";
+      renderAll();
+      alert("Mode hors-ligne : données chargées depuis le cache local (la synchro Google peut être bloquée).");
+      return;
+    }
     document.getElementById("loginError").innerText = "Erreur connexion serveur";
-  }
-}
+  }}
 // ============================================================
+
+
+// ===== STUB SÛR : certaines versions utilisaient renderInventoryList() =====
+if(typeof window.renderInventoryList !== "function"){
+  window.renderInventoryList = function(){
+    if(typeof window.renderAll === "function") window.renderAll();
+  };
+}
 
 </script>
 
@@ -6323,8 +6380,8 @@ z-index:9999;
     };
 
     saveState();
-    renderInventoryList();
-  });
+    if(typeof renderInventoryList==="function"){renderInventoryList();}else if(typeof renderAll==="function"){renderAll();}
+});
 })();
 
 
@@ -6371,8 +6428,8 @@ z-index:9999;
 
     saveState();
     if(typeof renderInventoryList === "function"){
-      renderInventoryList();
-    }
+      if(typeof renderInventoryList==="function"){renderInventoryList();}else if(typeof renderAll==="function"){renderAll();}
+}
   }, true);
 })();
 
@@ -6417,7 +6474,11 @@ z-index:9999;
   // Forcer un refresh immédiat si on est déjà sur Stock
   setTimeout(() => {
     if(document.getElementById("panel-stock")?.style.display !== "none"){
-      window.renderInventoryList();
+      if(typeof window.renderInventoryList === "function"){
+        window.renderInventoryList();
+      }else if(typeof window.renderAll === "function"){
+        window.renderAll();
+      }
     }
   }, 50);
 })();
@@ -6457,7 +6518,11 @@ z-index:9999;
 
   setTimeout(() => {
     if(document.getElementById("panel-stock")?.style.display !== "none"){
-      window.renderInventoryList();
+      if(typeof window.renderInventoryList === "function"){
+        window.renderInventoryList();
+      }else if(typeof window.renderAll === "function"){
+        window.renderAll();
+      }
     }
   }, 50);
 })();
@@ -6501,12 +6566,24 @@ z-index:9999;
 
   setTimeout(() => {
     if(document.getElementById("panel-stock")?.style.display !== "none"){
-      window.renderInventoryList();
+      if(typeof window.renderInventoryList === "function"){
+        window.renderInventoryList();
+      }else if(typeof window.renderAll === "function"){
+        window.renderAll();
+      }
     }
   }, 50);
 })();
 
 
+
+
+// ===== STUB SÛR : certaines versions utilisaient renderInventoryList() =====
+if(typeof window.renderInventoryList !== "function"){
+  window.renderInventoryList = function(){
+    if(typeof window.renderAll === "function") window.renderAll();
+  };
+}
 
 </script>
 
