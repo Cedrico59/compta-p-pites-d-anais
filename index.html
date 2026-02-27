@@ -1984,6 +1984,38 @@ function loadState(){
     return structuredClone(defaultState);
   }
 }
+
+// Normalise un état chargé (Google/JSON) pour éviter les erreurs si des champs manquent
+function normalizeState(obj){
+  try{
+    const parsed = (obj && typeof obj === "object") ? obj : {};
+    const st = structuredClone(defaultState);
+
+    st.settings = {
+      ...defaultState.settings,
+      ...(parsed.settings || {}),
+      platformFees: { ...defaultState.settings.platformFees, ...((parsed.settings||{}).platformFees || {}) },
+      seller: { ...defaultState.settings.seller, ...((parsed.settings||{}).seller || {}) }
+    };
+
+    st.catalog = {
+      ...defaultState.catalog,
+      ...(parsed.catalog || {}),
+      clothingTypes: (parsed.catalog?.clothingTypes || defaultState.catalog.clothingTypes).slice(),
+      brands: (parsed.catalog?.brands || defaultState.catalog.brands).slice()
+    };
+
+    st.inventory = parsed.inventory && typeof parsed.inventory === "object" ? parsed.inventory : {};
+    st.sales = Array.isArray(parsed.sales) ? parsed.sales : [];
+    st.supplierOrders = Array.isArray(parsed.supplierOrders) ? parsed.supplierOrders : [];
+    st.fraisGeneraux = Array.isArray(parsed.fraisGeneraux) ? parsed.fraisGeneraux : [];
+
+    return st;
+  }catch(e){
+    return structuredClone(defaultState);
+  }
+}
+
 function saveState(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
 let state = loadState();
 
@@ -3680,7 +3712,7 @@ async function checkPassword(){
       return;
     }
     APP_PASSWORD = input;
-    state = data;
+    state = normalizeState(data);
     document.getElementById("loginScreen").style.display = "none";
     renderAll();
   }catch(e){
