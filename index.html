@@ -3723,6 +3723,7 @@ let APP_PASSWORD = "";
 // Override saveState (remote)
 async function saveStateAsync(){
   if(!APP_PASSWORD) return;
+
   try{
     await fetch(API_URL, {
       method:"POST",
@@ -3733,11 +3734,17 @@ async function saveStateAsync(){
       })
     });
   }catch(e){
-    console.error("Erreur sauvegarde distante", e);
+    console.warn("Sauvegarde distante impossible (mode hors ligne)");
   }
 }
 
 function saveState(){
+  try{
+    localStorage.setItem(LS_KEY, JSON.stringify(state));
+  }catch(e){
+    console.warn("Erreur sauvegarde locale", e);
+  }
+
   saveStateAsync();
 }
 
