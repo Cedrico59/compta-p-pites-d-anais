@@ -3434,33 +3434,40 @@ document.addEventListener("DOMContentLoaded", () => {
     let totalQty = 0;
     let totalValue = 0;
 
-    if (!window.state || !state.inventory) return;
+    if (!window.state || !state.inventory) {
+      return { totalQty: 0, totalValue: 0 };
+    }
 
     for (const k in state.inventory) {
       const it = state.inventory[k];
       const q = Number(it.qty) || 0;
       const p = Number(it.buyPrice) || 0;
+
       totalQty += q;
       totalValue += q * p;
     }
 
-    const el = document.getElementById("stockRecapDashboard");
-    if (!el) return;
+    return { totalQty, totalValue };
+  }
 
-    el.innerHTML = `
+  function renderStockRecap() {
+    const recap = computeStockRecap();
+    const container = document.getElementById("stockRecapDashboard");
+    if (!container) return;
+
+    container.innerHTML = `
       <div class="metric">
         <div class="muted">Quantité totale en stock</div>
-        <div class="v"><strong>${totalQty}</strong></div>
+        <div class="v"><strong>${recap.totalQty}</strong></div>
       </div>
       <div class="metric">
-        <div class="muted">Valeur totale du stock (prix d’achat fournisseur)</div>
-        <div class="v"><strong>${money(totalValue)}</strong></div>
+        <div class="muted">Valeur totale du stock (achat)</div>
+        <div class="v"><strong>${money(recap.totalValue)}</strong></div>
       </div>
     `;
   }
 
-  computeStockRecap();
-  setInterval(computeStockRecap, 2000);
+  renderStockRecap();
 });
 
 
