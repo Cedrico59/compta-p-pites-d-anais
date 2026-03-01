@@ -1181,6 +1181,7 @@ z-index:9999;
       <div class="tab" data-tab="fournisseurs">Fournisseurs</div>
       <div class="tab" data-tab="comptabilite">Comptabilité</div>
       <div class="tab" data-tab="frais">Frais généraux</div>
+      <div class="tab" data-tab="corbeille">Corbeille</div>
       <div class="tab" data-tab="parametres">Paramètres</div>
     </div>
 
@@ -1486,6 +1487,18 @@ z-index:9999;
       </div>
     </section>
 
+
+    <!-- CORBEILLE -->
+    <section class="panel" id="panel-corbeille" style="display:none;">
+      <div class="card">
+        <h2>Corbeille des ventes</h2>
+        <div class="muted" style="margin-bottom:10px;">
+          Les ventes supprimées sont conservées ici. Tu peux restaurer (le stock sera re-décrémenté) ou supprimer définitivement.
+        </div>
+        <div id="trashSalesList" class="list"></div>
+      </div>
+    </section>
+
     <!-- FOURNISSEURS -->
     <section class="panel" id="panel-fournisseurs" style="display:none;">
       <div class="card" style="margin-bottom:14px;">
@@ -1623,9 +1636,11 @@ z-index:9999;
               <th class="rightAlign">Frais plateformes</th>
               <th class="rightAlign">Taxe entreprise</th>
               <th class="rightAlign">Net après taxes</th>
+              <th class="rightAlign">Bénéfice net</th>
               <th class="rightAlign">Frais généraux TTC</th>
+              <th class="rightAlign">Coût achat fournisseur (commandes)</th>
               <th class="rightAlign">Résultat net</th>
-            </tr>
+</tr>
           </thead>
           <tbody id="comptaTable"></tbody>
         </table>
@@ -2044,6 +2059,16 @@ function saveState(){
 }
 let state = loadState();
 
+// ✅ Corbeille: init
+if(!state.trashSales) state.trashSales = [];
+// ✅ Ensure corbeille state exists
+if(!state.trashSales) state.trashSales = [];
+
+
+// Corbeille des ventes
+if(!Array.isArray(state.trashSales)) state.trashSales = [];
+
+
 if (!state.catalog || !state.catalog.clothingTypes) {
   state = structuredClone(defaultState);
   localStorage.setItem(LS_KEY, JSON.stringify(state));
@@ -2318,6 +2343,51 @@ function deleteSale(id){
   saveState();
 }
 
+// 🔐 Suppression sécurisée + corbeille (remet le stock automatiquement)
+function deleteSaleSecure(id){
+  
+  if(!state.trashSales) state.trashSales = [];
+const sale = state.sales.find(s=>s.id===id);
+  if(!sale) return;
+  if(!confirm("⚠️ Voulez-vous annuler cette vente ?")) return;
+  if(!confirm("Dernière confirmation : la vente ira dans la corbeille et le stock sera remis.")) return;
+
+  // Remettre le stock
+  for(const l of (sale.lines||[])){
+    const q = Number(l.qty)||0;
+    if(l.key && q>0) applyInventoryDelta(l.key, +q);
+  }
+
+  // Déplacer en corbeille
+  state.trashSales.unshift({ ...sale, deletedAt: todayISO() });
+
+  // Retirer des ventes actives
+  state.sales = state.sales.filter(s=>s.id!==id);
+  saveState();
+  renderAll();
+}
+function restoreSaleFromTrash(id){
+  const sale = state.trashSales.find(s=>s.id===id);
+  if(!sale) return;
+
+  // Re-décrémenter le stock (comme si on revalidait la vente)
+  for(const l of (sale.lines||[])){
+    const q = Number(l.qty)||0;
+    if(l.key && q>0) applyInventoryDelta(l.key, -q);
+  }
+
+  state.sales.unshift(sale);
+  state.trashSales = state.trashSales.filter(s=>s.id!==id);
+  saveState();
+  renderAll();
+}
+function deleteSaleForever(id){
+  if(!confirm("Supprimer définitivement cette vente de la corbeille ?")) return;
+  state.trashSales = state.trashSales.filter(s=>s.id!==id);
+  saveState();
+  renderAll();
+}
+
 /* =========================
    Supplier ops
 ========================= */
@@ -2569,10 +2639,11 @@ function exportDashboardCSV(){
 function computeAccountingMonthlyRows(){
   const monthlySales = aggregateSalesByMonth();
   const monthlyFG = aggregateFGByMonth();
-
-  const months = new Set([
+  const monthlyPO = aggregatePOByMonth();
+const months = new Set([
     ...monthlySales.map(x=>x.month),
     ...monthlyFG.map(x=>x.month),
+    ...monthlyPO.map(x=>x.month),
     ymKey(todayISO())
   ]);
   const sortedMonths = Array.from(months).sort();
@@ -2580,8 +2651,14 @@ function computeAccountingMonthlyRows(){
   return sortedMonths.map(m=>{
     const s = monthlySales.find(x=>x.month===m) || { gross:0, buyTotal:0, platformFee:0, corporateTax:0, netAfterTax:0 };
     const fg = monthlyFG.find(x=>x.month===m) || { ttc:0 };
+    const po = monthlyPO.find(x=>x.month===m) || { total:0 };
+
     const margeBrute = s.gross - s.buyTotal;
-    const resultatNet = s.netAfterTax - s.buyTotal - fg.ttc;
+    const coutCommandes = po.total;
+
+    // Résultat net (mensuel) = Net après taxes - (Frais généraux TTC + Coût achats fournisseur du mois)
+    const beneficeNet = s.gross - s.buyTotal - s.platformFee - s.corporateTax;
+    const resultatNet = beneficeNet - (fg.ttc + coutCommandes);
     return {
       Mois: m,
       CABrut: s.gross,
@@ -2590,7 +2667,9 @@ function computeAccountingMonthlyRows(){
       FraisPlateformes: s.platformFee,
       TaxeEntreprise: s.corporateTax,
       NetApresTaxes: s.netAfterTax,
+      BeneficeNet: (s.gross - s.buyTotal - s.platformFee - s.corporateTax),
       FraisGenerauxTTC: fg.ttc,
+      CoutAchatFournisseurCommandes: coutCommandes,
       ResultatNet: resultatNet
     };
   });
@@ -2609,6 +2688,7 @@ function renderAll(){
   renderDashboardPanel();
   renderComptabilite();
   renderFraisGeneraux();
+  renderTrashPanel();
 }
 
 function renderSelects(){
@@ -2846,7 +2926,93 @@ function renderSalesPanel(){
     { label:"Résultat net", value: money(t.netAfterTax), strong:true },
     { label:"Résultat net (marge - frais)", value: money((t.gross - t.buyTotal) - t.platformFee - t.corporateTax), strong:true },
   ]);
+
+  // Mettre à jour l'historique à chaque rendu
+  renderSalesHistory();
 }
+
+function renderTrashPanel(){
+  const box = document.getElementById("trashSalesList");
+  if(!box) return;
+  const trash = state.trashSales || [];
+  if(trash.length===0){
+    box.innerHTML = `<div class="muted">Corbeille vide.</div>`;
+    return;
+  }
+  box.innerHTML = trash.map(s=>{
+    const totals = computeSaleTotals(s);
+    const channelLabel = (CHANNELS.find(c=>c.id===s.channel)||{}).label || s.channel;
+    return `
+      <div class="item">
+        <div class="itemHead">
+          <div class="left">
+            <div><b>${escapeHTML(s.date)}</b> — ${escapeHTML(channelLabel)} ${s.deletedAt?`<span class="muted">• supprimée le ${escapeHTML(s.deletedAt)}</span>`:""}</div>
+            <div class="muted">CA: ${money(totals.gross)} • Achat: ${money(totals.buyTotal)}</div>
+          </div>
+          <div class="right">
+            <button class="secondary" onclick="restoreSaleFromTrash('${s.id}')">♻️ Restaurer</button>
+            <button class="danger" onclick="deleteSaleForever('${s.id}')">🗑 Supprimer définitivement</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderSalesHistory(){
+  const box = document.getElementById("salesHistory");
+  if(!box) return;
+
+  const q = (document.getElementById("saleSearch")?.value || "").trim().toLowerCase();
+  const sales = (state.sales||[]).slice(); // déjà triées (unshift)
+
+  const filtered = !q ? sales : sales.filter(s=>{
+    const channelLabel = (CHANNELS.find(c=>c.id===s.channel)||{}).label || s.channel;
+    const hay = [
+      s.date, s.channel, channelLabel, s.notes||"",
+      ...(s.lines||[]).flatMap(l=>[l.clothingType,l.brand,l.segment,l.grade,l.lot||"", String(l.qty||""), String(l.unitPrice||"")])
+    ].join(" ").toLowerCase();
+    return hay.includes(q);
+  });
+
+  if(filtered.length===0){
+    box.innerHTML = `<div class="muted">Aucune vente.</div>`;
+    return;
+  }
+
+  box.innerHTML = filtered.map(s=>{
+    const totals = computeSaleTotals(s);
+    const channelLabel = (CHANNELS.find(c=>c.id===s.channel)||{}).label || s.channel;
+    const benefNet = totals.gross - totals.buyTotal - totals.platformFee - totals.corporateTax;
+
+    const lines = (s.lines||[]).map(l=>`
+      <div class="muted small">
+        ${escapeHTML(l.clothingType)} • ${escapeHTML(l.brand)} • ${escapeHTML(l.segment)} • ${escapeHTML(l.grade)}
+        ${l.lot?` • Lot: ${escapeHTML(l.lot)}`:""}
+        — ${Number(l.qty)||0} × ${money(Number(l.unitPrice)||0)}
+      </div>
+    `).join("");
+
+    return `
+      <div class="item">
+        <div class="itemHead">
+          <div class="left">
+            <div><b>${escapeHTML(s.date)}</b> — ${escapeHTML(channelLabel)} ${s.notes?`<span class="muted">• ${escapeHTML(s.notes)}</span>`:""}</div>
+            <div class="muted">CA: ${money(totals.gross)} • Achat: ${money(totals.buyTotal)} • Bénéfice net: ${money(benefNet)}</div>
+            ${lines}
+          </div>
+          <div class="right">
+            
+            <button class="ghost" onclick="openInvoicePro('${s.id}')">Facture Pro</button>
+            <button class="danger" onclick="deleteSaleSecure('${s.id}')">Annuler la vente</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+
 function removeDraftLine(idx){
   saleDraftLines.splice(idx,1);
   renderAll();
@@ -2973,13 +3139,13 @@ function renderDashboardPanel(){
   const mFG = monthlyFG.find(x=>x.month===selMonth) || { month:selMonth, ht:0, ttc:0, tva:0 };
   const yFG = yearlyFG.find(x=>x.year===selYear) || { year:selYear, ht:0, ttc:0, tva:0 };
 
-  // Résultat net FINAL (on déduit les frais généraux + le coût fournisseur)
-  const mResultNet = (mS.netAfterTax - mFG.ttc) - (Number(mPO.total)||0);
-  const yResultNet = (yS.netAfterTax - yFG.ttc) - (Number(yPO.total)||0);
-
   // Bénéfice net = CA brut - coût achat - frais plateforme - taxe entreprise
   const mBeneficeNet = mS.gross - mS.buyTotal - mS.platformFee - mS.corporateTax;
   const yBeneficeNet = yS.gross - yS.buyTotal - yS.platformFee - yS.corporateTax;
+
+  // Résultat net FINAL = bénéfice net - frais généraux - coût fournisseur (commandes)
+  const mResultNet = (mBeneficeNet - mFG.ttc) - (Number(mPO.total)||0);
+  const yResultNet = (yBeneficeNet - yFG.ttc) - (Number(yPO.total)||0);
 
   renderMetricBlock($("monthMetrics"), [
     {label:"Chiffre d'affaires (brut)", value: money(mS.gross)},
@@ -3032,10 +3198,12 @@ function renderComptabilite(){
       <td class="rightAlign">${money(r.FraisPlateformes)}</td>
       <td class="rightAlign">${money(r.TaxeEntreprise)}</td>
       <td class="rightAlign">${money(r.NetApresTaxes)}</td>
+      <td class="rightAlign">${money(r.BeneficeNet)}</td>
       <td class="rightAlign">${money(r.FraisGenerauxTTC)}</td>
-      <td class="rightAlign"><b>${money(r.ResultatNet)}</b></td>
+      <td class="rightAlign">${money(r.CoutAchatFournisseurCommandes)}</td>
+      <td class="rightAlign">${money(r.ResultatNet)}</td>
     </tr>
-  `).join("");
+` ).join("");
 }
 
 function renderFraisGeneraux(){
@@ -3927,6 +4095,60 @@ if(typeof window.renderInventoryList !== "function"){
   window.renderInventoryList = function(){
     if(typeof window.renderAll === "function") window.renderAll();
   };
+}
+
+
+
+
+
+
+
+
+/* ===== SAFE DASHBOARD EXPORT (V7) ===== */
+function exportDashboardCSV(){
+  if (typeof computeAccountingMonthlyRows !== "function") return;
+
+  const rows = computeAccountingMonthlyRows();
+
+  const headers = [
+    "Mois",
+    "CA brut",
+    "Coût achat",
+    "Marge brute",
+    "Frais plateformes",
+    "Taxe entreprise",
+    "Net après taxes",
+    "Bénéfice net",
+    "Frais généraux TTC",
+    "Coût achat fournisseur (commandes)",
+    "Résultat net"
+  ];
+
+  let csv = headers.join(";") + "\n";
+
+  rows.forEach(r=>{
+    csv += [
+      r.Mois,
+      r.CABrut,
+      r.CoutAchat,
+      r.MargeBrute,
+      r.FraisPlateformes,
+      r.TaxeEntreprise,
+      r.NetApresTaxes,
+      r.BeneficeNet,
+      r.FraisGenerauxTTC,
+      r.CoutAchatFournisseurCommandes,
+      r.ResultatNet
+    ].join(";") + "\n";
+  });
+
+  const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "dashboard_complet.csv";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 </script>
@@ -6734,6 +6956,60 @@ if(typeof window.renderInventoryList !== "function"){
   window.renderInventoryList = function(){
     if(typeof window.renderAll === "function") window.renderAll();
   };
+}
+
+
+
+
+
+
+
+
+/* ===== SAFE DASHBOARD EXPORT (V7) ===== */
+function exportDashboardCSV(){
+  if (typeof computeAccountingMonthlyRows !== "function") return;
+
+  const rows = computeAccountingMonthlyRows();
+
+  const headers = [
+    "Mois",
+    "CA brut",
+    "Coût achat",
+    "Marge brute",
+    "Frais plateformes",
+    "Taxe entreprise",
+    "Net après taxes",
+    "Bénéfice net",
+    "Frais généraux TTC",
+    "Coût achat fournisseur (commandes)",
+    "Résultat net"
+  ];
+
+  let csv = headers.join(";") + "\n";
+
+  rows.forEach(r=>{
+    csv += [
+      r.Mois,
+      r.CABrut,
+      r.CoutAchat,
+      r.MargeBrute,
+      r.FraisPlateformes,
+      r.TaxeEntreprise,
+      r.NetApresTaxes,
+      r.BeneficeNet,
+      r.FraisGenerauxTTC,
+      r.CoutAchatFournisseurCommandes,
+      r.ResultatNet
+    ].join(";") + "\n";
+  });
+
+  const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "dashboard_complet.csv";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 </script>
