@@ -1186,7 +1186,7 @@ z-index:9999;
 
     <!-- DASHBOARD -->
     <section class="panel" id="panel-dashboard">
-      <section class="panel" id="panel-dashboard"></section>
+     
       <div class="card" style="margin-bottom:14px;">
         <div class="row">
           <div class="field" style="min-width:260px;">
@@ -2237,6 +2237,7 @@ function clearSaleDraftStorage(){
    Sales ops
 ========================= */
 let saleDraftLines = loadSaleDraftLines();
+let editingPOId = null;
 
 function addSaleLine(line){
   // Réserver le stock tout de suite
@@ -2284,6 +2285,48 @@ function createPO(order){
   state.supplierOrders.unshift({ ...order, id: uid("po") });
   saveState();
 }
+
+function editPO(id){
+  const order = state.supplierOrders.find(o => o.id === id);
+  if(!order){
+    alert("Commande introuvable.");
+    return;
+  }
+
+  editingPOId = id;
+
+  $("poSupplier").value = order.supplier || "";
+  $("poCreatedAt").value = order.createdAt || todayISO();
+  $("poExpectedAt").value = order.expectedAt || "";
+  $("poTracking").value = order.tracking || "";
+  $("poStatus").value = order.status || "EN_COURS";
+  $("poNotes").value = order.notes || "";
+
+  poDraftLines = order.lines ? structuredClone(order.lines) : [];
+
+  renderAll();
+
+  alert("Mode modification activé.");
+}
+
+function updatePO(id, data){
+  const index = state.supplierOrders.findIndex(o => o.id === id);
+
+  if(index === -1){
+    alert("Commande introuvable.");
+    return;
+  }
+
+  state.supplierOrders[index] = {
+    ...state.supplierOrders[index],
+    ...data
+  };
+
+  saveState();
+  renderAll();
+  alert("Commande mise à jour.");
+}
+
 function markPOReceived(id, addToStock){
   const po = state.supplierOrders.find(o=>o.id===id);
   if(!po) return;
@@ -2315,6 +2358,7 @@ function deletePO(id){
   state.supplierOrders = state.supplierOrders.filter(o=>o.id!==id);
   saveState();
 }
+
 
 /* =========================
    Frais généraux ops
@@ -2855,6 +2899,7 @@ function renderSupplierPanel(){
               <button class="ghost" onclick="togglePOLines('${o.id}')">Voir lignes</button>
               <button class="secondary" ${o.status==="RECU"?"disabled":""} onclick="receivePO('${o.id}')">Marquer reçu</button>
               <button class="danger" onclick="deletePO('${o.id}'); renderAll();">Supprimer</button>
+              <button onclick="editPO('${o.id}')">Modifier</button>
             </div>
           </div>
           <div id="poLines_${o.id}" style="display:none; margin-top:10px;" class="list"></div>
@@ -3211,9 +3256,23 @@ function hookEvents(){
     addPOLine({ id: uid("pol"), clothingType:type, brand, segment:seg, grade, qty, unitCost:cost });
     renderAll();
   });
-  $("btnSavePO").addEventListener("click", ()=>{
-    const supplier = ($("poSupplier").value||"").trim();
-    if(!supplier) return alert("Fournisseur obligatoire.");
+ $("btnCreatePO").addEventListener("click", ()=>{
+  const supplier = $("poSupplier").value.trim();
+  if(!supplier) return alert("Fournisseur obligatoire.");
+
+  if(editingPOId){
+    updatePO(editingPOId, {
+      supplier,
+      createdAt: $("poCreatedAt").value || todayISO(),
+      expectedAt: $("poExpectedAt").value || "",
+      tracking: $("poTracking").value || "",
+      status: $("poStatus").value || "EN_COURS",
+      notes: $("poNotes").value || "",
+      lines: poDraftLines
+    });
+
+    editingPOId = null;
+  }else{
     createPO({
       supplier,
       createdAt: $("poCreatedAt").value || todayISO(),
@@ -3223,14 +3282,11 @@ function hookEvents(){
       notes: $("poNotes").value || "",
       lines: poDraftLines
     });
-    clearPODraft();
-    $("poSupplier").value = "";
-    $("poExpectedAt").value = "";
-    $("poTracking").value = "";
-    $("poNotes").value = "";
-    $("poStatus").value = "EN_COURS";
-    renderAll();
-  });
+  }
+
+  clearPODraft();
+  renderAll();
+});
 
   $("btnSaveSettings").addEventListener("click", ()=>{
     state.settings.platformFees.MAGASIN = clamp01(Number($("feeMAGASIN").value)/100);
