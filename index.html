@@ -2925,15 +2925,21 @@ function renderDashboardPanel(){
   const mResultNet = (mS.netAfterTax - mS.buyTotal) - mFG.ttc;
   const yResultNet = (yS.netAfterTax - yS.buyTotal) - yFG.ttc;
 
+// Bénéfice net = CA brut - coût achat - frais plateforme - taxe entreprise
+const mBeneficeNet = mS.gross - mS.buyTotal - mS.platformFee - mS.corporateTax;
+const yBeneficeNet = yS.gross - yS.buyTotal - yS.platformFee - yS.corporateTax;
+
   renderMetricBlock($("monthMetrics"), [
-    {label:"Chiffre d'affaires (brut)", value: money(mS.gross)},
-    {label:"Coût d'achat", value: money(mS.buyTotal)},
-    {label:"Frais plateformes", value: money(mS.platformFee)},
-    {label:"Taxe entreprise", value: money(mS.corporateTax)},
-    {label:"Net après taxes (ventes)", value: money(mS.netAfterTax), strong:true},
-    {label:"Frais généraux TTC", value: money(mFG.ttc)},
-    {label:"Résultat net (marge - frais)", value: money(mResultNet), strong:true},
-  ]);
+  {label:"Chiffre d'affaires (brut)", value: money(mS.gross)},
+  {label:"Bénéfice net", value: money(mBeneficeNet), strong:true},
+
+  {label:"Coût d'achat", value: money(mS.buyTotal)},
+  {label:"Frais plateformes", value: money(mS.platformFee)},
+  {label:"Taxe entreprise", value: money(mS.corporateTax)},
+  {label:"Net après taxes (ventes)", value: money(mS.netAfterTax)},
+  {label:"Frais généraux TTC", value: money(mFG.ttc)},
+  {label:"Résultat net (marge - frais)", value: money(mResultNet), strong:true},
+]);
 
   renderMetricBlock($("monthChannels"), [
     {label:"Magasin", value: money(mS.MAGASIN)},
@@ -2942,14 +2948,16 @@ function renderDashboardPanel(){
   ]);
 
   renderMetricBlock($("yearMetrics"), [
-    {label:"Chiffre d'affaires (brut)", value: money(yS.gross)},
-    {label:"Coût d'achat", value: money(yS.buyTotal)},
-    {label:"Frais plateformes", value: money(yS.platformFee)},
-    {label:"Taxe entreprise", value: money(yS.corporateTax)},
-    {label:"Net après taxes (ventes)", value: money(yS.netAfterTax), strong:true},
-    {label:"Frais généraux TTC", value: money(yFG.ttc)},
-    {label:"Résultat net (marge - frais)", value: money(yResultNet), strong:true},
-  ]);
+  {label:"Chiffre d'affaires (brut)", value: money(yS.gross)},
+  {label:"Bénéfice net", value: money(yBeneficeNet), strong:true},
+
+  {label:"Coût d'achat", value: money(yS.buyTotal)},
+  {label:"Frais plateformes", value: money(yS.platformFee)},
+  {label:"Taxe entreprise", value: money(yS.corporateTax)},
+  {label:"Net après taxes (ventes)", value: money(yS.netAfterTax)},
+  {label:"Frais généraux TTC", value: money(yFG.ttc)},
+  {label:"Résultat net (marge - frais)", value: money(yResultNet), strong:true},
+]);
 
   renderChart(monthlySales);
 }
