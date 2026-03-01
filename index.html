@@ -2952,19 +2952,20 @@ function renderSettingsPanel(){
 }
 
 function renderDashboardPanel(){
-  const monthlySales = aggregateSalesByMonth();
-  const yearlySales = aggregateSalesByYear();
-  const monthlyFG = aggregateFGByMonth();
-  const yearlyFG = aggregateFGByYear();
-
-  const monthlyPO = aggregatePOByMonth();
-const yearlyPO  = aggregatePOByYear();
-
-const mPO = monthlyPO.find(x=>x.month===selMonth) || { total:0 };
-const yPO = yearlyPO.find(x=>x.year===selYear) || { total:0 };
-
   const selMonth = $("dashMonth").value || ymKey(todayISO());
   const selYear  = $("dashYear").value  || String(new Date().getFullYear());
+
+  const monthlySales = aggregateSalesByMonth();
+  const yearlySales  = aggregateSalesByYear();
+  const monthlyFG    = aggregateFGByMonth();
+  const yearlyFG     = aggregateFGByYear();
+
+  // Commandes fournisseur (coûts)
+  const monthlyPO = (typeof aggregatePOByMonth === "function") ? aggregatePOByMonth() : [];
+  const yearlyPO  = (typeof aggregatePOByYear  === "function") ? aggregatePOByYear()  : [];
+
+  const mPO = monthlyPO.find(x=>x.month===selMonth) || { total:0 };
+  const yPO = yearlyPO.find(x=>x.year===selYear) || { total:0 };
 
   const mS = monthlySales.find(x=>x.month===selMonth) || { month: selMonth, gross:0, buyTotal:0, platformFee:0, corporateTax:0, netAfterTax:0, MAGASIN:0, WHATNOT:0, VINTED:0 };
   const yS = yearlySales.find(x=>x.year===selYear) || { year: selYear, gross:0, buyTotal:0, platformFee:0, corporateTax:0, netAfterTax:0, MAGASIN:0, WHATNOT:0, VINTED:0 };
@@ -2972,32 +2973,28 @@ const yPO = yearlyPO.find(x=>x.year===selYear) || { total:0 };
   const mFG = monthlyFG.find(x=>x.month===selMonth) || { month:selMonth, ht:0, ttc:0, tva:0 };
   const yFG = yearlyFG.find(x=>x.year===selYear) || { year:selYear, ht:0, ttc:0, tva:0 };
 
-  // Résultat net AVANT achat fournisseur
-const mResultAvantAchat = (mS.netAfterTax - mFG.ttc);
-const yResultAvantAchat = (yS.netAfterTax - yFG.ttc);
+  // Résultat net FINAL (on déduit les frais généraux + le coût fournisseur)
+  const mResultNet = (mS.netAfterTax - mFG.ttc) - (Number(mPO.total)||0);
+  const yResultNet = (yS.netAfterTax - yFG.ttc) - (Number(yPO.total)||0);
 
-// Résultat net FINAL (on déduit le coût fournisseur)
-const mResultNet = (mS.netAfterTax - mFG.ttc) - mPO.total;
-const yResultNet = (yS.netAfterTax - yFG.ttc) - yPO.total;
-
-// Bénéfice net = CA brut - coût achat - frais plateforme - taxe entreprise
-const mBeneficeNet = mS.gross - mS.buyTotal - mS.platformFee - mS.corporateTax;
-const yBeneficeNet = yS.gross - yS.buyTotal - yS.platformFee - yS.corporateTax;
+  // Bénéfice net = CA brut - coût achat - frais plateforme - taxe entreprise
+  const mBeneficeNet = mS.gross - mS.buyTotal - mS.platformFee - mS.corporateTax;
+  const yBeneficeNet = yS.gross - yS.buyTotal - yS.platformFee - yS.corporateTax;
 
   renderMetricBlock($("monthMetrics"), [
-  {label:"Chiffre d'affaires (brut)", value: money(mS.gross)},
-  {label:"Bénéfice net", value: money(mBeneficeNet), strong:true},
+    {label:"Chiffre d'affaires (brut)", value: money(mS.gross)},
+    {label:"Bénéfice net", value: money(mBeneficeNet), strong:true},
 
-  {label:"Coût d'achat", value: money(mS.buyTotal)},
-  {label:"Frais plateformes", value: money(mS.platformFee)},
-  {label:"Taxe entreprise", value: money(mS.corporateTax)},
-  {label:"Net après taxes (ventes)", value: money(mS.netAfterTax), strong:true},
+    {label:"Coût d'achat", value: money(mS.buyTotal)},
+    {label:"Frais plateformes", value: money(mS.platformFee)},
+    {label:"Taxe entreprise", value: money(mS.corporateTax)},
+    {label:"Net après taxes (ventes)", value: money(mS.netAfterTax), strong:true},
 
-  {label:"Frais généraux TTC", value: money(mFG.ttc)},
-  {label:"Coût d'achat fournisseur (commandes)", value: money(mPO.total)},
+    {label:"Frais généraux TTC", value: money(mFG.ttc)},
+    {label:"Coût d'achat fournisseur (commandes)", value: money(mPO.total||0)},
 
-  {label:"Résultat net final", value: money(mResultNet), strong:true},
-]);
+    {label:"Résultat net final", value: money(mResultNet), strong:true},
+  ]);
 
   renderMetricBlock($("monthChannels"), [
     {label:"Magasin", value: money(mS.MAGASIN)},
@@ -3005,23 +3002,24 @@ const yBeneficeNet = yS.gross - yS.buyTotal - yS.platformFee - yS.corporateTax;
     {label:"Vinted", value: money(mS.VINTED)},
   ]);
 
- renderMetricBlock($("yearMetrics"), [
-  {label:"Chiffre d'affaires (brut)", value: money(yS.gross)},
-  {label:"Bénéfice net", value: money(yBeneficeNet), strong:true},
+  renderMetricBlock($("yearMetrics"), [
+    {label:"Chiffre d'affaires (brut)", value: money(yS.gross)},
+    {label:"Bénéfice net", value: money(yBeneficeNet), strong:true},
 
-  {label:"Coût d'achat", value: money(yS.buyTotal)},
-  {label:"Frais plateformes", value: money(yS.platformFee)},
-  {label:"Taxe entreprise", value: money(yS.corporateTax)},
-  {label:"Net après taxes (ventes)", value: money(yS.netAfterTax), strong:true},
+    {label:"Coût d'achat", value: money(yS.buyTotal)},
+    {label:"Frais plateformes", value: money(yS.platformFee)},
+    {label:"Taxe entreprise", value: money(yS.corporateTax)},
+    {label:"Net après taxes (ventes)", value: money(yS.netAfterTax), strong:true},
 
-  {label:"Frais généraux TTC", value: money(yFG.ttc)},
-  {label:"Coût d'achat fournisseur", value: money(yS.buyTotal)},
+    {label:"Frais généraux TTC", value: money(yFG.ttc)},
+    {label:"Coût d'achat fournisseur (commandes)", value: money(yPO.total||0)},
 
-  {label:"Résultat net final", value: money(yResultNet), strong:true},
-]);
+    {label:"Résultat net final", value: money(yResultNet), strong:true},
+  ]);
 
   renderChart(monthlySales);
 }
+
 
 function renderComptabilite(){
   const rows = computeAccountingMonthlyRows();
