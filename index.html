@@ -1279,10 +1279,7 @@ z-index:9999;
               <label>Catégorie</label>
               <select id="invSegment"></select>
             </div>
-            <div class="field">
-              <label>Grade</label>
-              <select id="invGrade"></select>
-            </div>
+           
           </div>
           <div class="row" style="margin-top:10px;">
             <div class="field">
@@ -1428,9 +1425,7 @@ z-index:9999;
             <label>Catégorie</label>
             <select id="lineSegment"></select>
           </div>
-          <div class="field">
-            <label>Grade</label>
-            <select id="lineGrade"></select>
+          
 <div class="field">
   <label>Lot</label>
   <select id="lineLot"></select>
@@ -1565,10 +1560,7 @@ z-index:9999;
             <label>Catégorie</label>
             <select id="poLineSegment"></select>
           </div>
-          <div class="field">
-            <label>Grade</label>
-            <select id="poLineGrade"></select>
-          </div>
+         
           
 <div class="field">
   <label>Numéro de lot</label>
@@ -1842,10 +1834,6 @@ let __cachedState = null;
 try{ __cachedState = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); }catch(e){}
 
 
-const GRADES = [
-  { id: "A", label: "Grade A (comme neuf)" },
-  { id: "B", label: "Grade B (petit défaut)" },
-];
 const SEGMENTS = [
   { id: "HOMME", label: "Homme" },
   { id: "FEMME", label: "Femme" },
@@ -1894,8 +1882,8 @@ function escapeHTML(str){
 }
 
 // Stock key: type|brand|segment|grade
-function invKey(type, brand, segment, grade, lot){
-  return `${type}|${brand}|${segment}|${grade}|${lot}`;
+function invKey(type, brand, segment, lot){
+  return `${type}|${brand}|${segment}|${lot}`;
 }
 function parseInvKey(key){
   const [clothingType, brand, segment, grade, lot] = String(key).split("|");
