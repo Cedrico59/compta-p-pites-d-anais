@@ -231,7 +231,16 @@
   0%{ transform: rotate(0deg); }
   100%{ transform: rotate(360deg); }
 }
-  </style>
+  
+/* Hide Grade fields */
+#invGrade,
+#lineGrade,
+#poLineGrade,
+#fGrade{
+  display:none !important;
+}
+
+</style>
 <!-- padding line 0001 -->
 <!-- padding line 0002 -->
 <!-- padding line 0003 -->
@@ -1159,9 +1168,9 @@ z-index:9999;
 </div>
     <header>
       <div>
-        <h1>Gestion Seconde Main — Stock, Ventes, Comptabilité & Factures</h1>
+        <h1>Gestion Stock, Ventes, Comptabilité & Factures</h1>
         <div class="sub">
-          Stock par <b>Grade A/B</b> + <b>Type + Marque</b> + <b>Homme/Femme/Mixte/Enfant/Fille/Garçon</b>.
+          Stock par </b> + <b>Type + Marque</b> + <b>Homme/Femme/Mixte/Enfant/Fille/Garçon</b>.
           Ventes <b>magasin / Whatnot / Vinted</b>. Dashboard mensuel & annuel.
           Prix d’achat fournisseur unitaire + marge. Comptabilité + frais généraux + suivi commandes fournisseur.
           Exports CSV (Excel) partout.
@@ -1279,7 +1288,10 @@ z-index:9999;
               <label>Catégorie</label>
               <select id="invSegment"></select>
             </div>
-           
+            <div class="field">
+              <label></label>
+              <select id="invGrade"></select>
+            </div>
           </div>
           <div class="row" style="margin-top:10px;">
             <div class="field">
@@ -1425,7 +1437,9 @@ z-index:9999;
             <label>Catégorie</label>
             <select id="lineSegment"></select>
           </div>
-          
+          <div class="field">
+            <label></label>
+            <select id="lineGrade"></select>
 <div class="field">
   <label>Lot</label>
   <select id="lineLot"></select>
@@ -1560,7 +1574,10 @@ z-index:9999;
             <label>Catégorie</label>
             <select id="poLineSegment"></select>
           </div>
-         
+          <div class="field">
+           <label></label>
+            <select id="poLineGrade"></select>
+          </div>
           
 <div class="field">
   <label>Numéro de lot</label>
@@ -1834,6 +1851,10 @@ let __cachedState = null;
 try{ __cachedState = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); }catch(e){}
 
 
+const GRADES = [
+  { id: "A", label: "Grade A (comme neuf)" },
+  { id: "B", label: "Grade B (petit défaut)" },
+];
 const SEGMENTS = [
   { id: "HOMME", label: "Homme" },
   { id: "FEMME", label: "Femme" },
@@ -1882,8 +1903,8 @@ function escapeHTML(str){
 }
 
 // Stock key: type|brand|segment|grade
-function invKey(type, brand, segment, lot){
-  return `${type}|${brand}|${segment}|${lot}`;
+function invKey(type, brand, segment, grade, lot){
+  return `${type}|${brand}|${segment}|${grade}|${lot}`;
 }
 function parseInvKey(key){
   const [clothingType, brand, segment, grade, lot] = String(key).split("|");
@@ -4557,6 +4578,15 @@ function exportDashboardCSV(){
   .top{display:flex; justify-content:space-between; gap:20px;}
   .box{width:48%;}
   .foot{margin-top:24px; font-size:12px;}
+
+/* Hide Grade fields */
+#invGrade,
+#lineGrade,
+#poLineGrade,
+#fGrade{
+  display:none !important;
+}
+
 </style>
 <!-- padding line 0001 -->
 <!-- padding line 0002 -->
@@ -5547,6 +5577,15 @@ z-index:9999;
   .top{display:flex; justify-content:space-between; gap:20px;}
   .box{width:48%;}
   .foot{margin-top:24px; font-size:12px;}
+
+/* Hide Grade fields */
+#invGrade,
+#lineGrade,
+#poLineGrade,
+#fGrade{
+  display:none !important;
+}
+
 </style>
 <!-- padding line 0001 -->
 <!-- padding line 0002 -->
