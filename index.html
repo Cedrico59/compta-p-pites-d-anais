@@ -7156,48 +7156,50 @@ function exportDashboardCSV(){
     queueRemoteSave();
   };
 
-  
-window.checkPassword = async function(){
-
-  const input = document.getElementById("appPassword").value.trim();
-  const error = document.getElementById("loginError");
-
-  if(error) error.textContent = "";
-
-  if(!input){
-    if(error) error.textContent = "Mot de passe requis";
-    return;
-  }
-
-  try{
-
-    const res = await fetch(API_URL + "?password=" + encodeURIComponent(input));
-    const data = await res.json();
-
-    if(data.error){
-      if(error) error.textContent = "Mot de passe incorrect";
+  window.checkPassword = async function(){
+    const inputEl = document.getElementById('appPassword');
+    const errorEl = document.getElementById('loginError');
+    const input = (inputEl?.value || '').trim();
+    if(errorEl) errorEl.textContent = '';
+    if(!input){
+      if(errorEl) errorEl.textContent = 'Mot de passe requis';
       return;
     }
-
-    window.APP_PASSWORD = input;
-    window.state = data;
-    try{ state = data }catch(e){}
-
-    localStorage.setItem(LS_KEY, JSON.stringify(data));
-
-    const login = document.getElementById("loginScreen");
-    if(login) login.style.display = "none";
-
-    if(typeof renderAll === "function"){
-      renderAll();
+    setStatusMain('Connexion...', '');
+    try{
+      const data = typeof jsonp === 'function'
+        ? await jsonp(API_URL + '?password=' + encodeURIComponent(input))
+        : await fetch(API_URL + '?password=' + encodeURIComponent(input)).then(r=>r.json());
+      if(data && data.error){
+        if(errorEl) errorEl.textContent = 'Mot de passe incorrect';
+        setStatusMain('Connexion refusee', 'bad');
+        return;
+      }
+      window.APP_PASSWORD = input;
+      window.state = normalizeStateFinal(data);
+      try{ localStorage.setItem(LS_KEY, JSON.stringify(window.state)); }catch(e){}
+      const login = document.getElementById('loginScreen');
+      if(login) login.style.display = 'none';
+      if(typeof renderAll === 'function') renderAll();
+      setStatusMain('Connecte', 'ok');
+    }catch(e){
+      console.warn('login failed', e);
+      try{
+        const cached = localStorage.getItem(LS_KEY);
+        if(cached){
+          window.APP_PASSWORD = input;
+          window.state = normalizeStateFinal(JSON.parse(cached));
+          const login = document.getElementById('loginScreen');
+          if(login) login.style.display = 'none';
+          if(typeof renderAll === 'function') renderAll();
+          setStatusMain('Mode hors ligne', '');
+          return;
+        }
+      }catch(_e){}
+      if(errorEl) errorEl.textContent = 'Erreur connexion serveur';
+      setStatusMain('Erreur connexion', 'bad');
     }
-
-  }catch(e){
-    console.error(e);
-    if(error) error.textContent = "Erreur connexion serveur";
-  }
-};
-
+  };
 
   window.removeDraftLine = function(idx){
     try{
@@ -7262,6 +7264,244 @@ window.checkPassword = async function(){
     hideMissingLogo();
     setStatusMain('Pret', '');
     try{ window.state = normalizeStateFinal(window.state || window.loadState()); }catch(e){}
+  });
+})();
+</script>
+
+
+<!-- FINAL STABLE PATCH: GitHub Pages + Google Apps Script (JSONP GET + hidden form POST) -->
+<iframe name="saveFrameFinal" style="display:none;"></iframe>
+<script>
+(function(){
+  const STATUS_ID = "syncStatusFinalStable";
+  let saveTimer = null;
+
+  function syncState(next){
+    try{ state = next; }catch(e){}
+    window.state = next;
+    return next;
+  }
+
+  function getCurrentState(){
+    return syncState(window.state || (typeof state !== "undefined" ? state : {}));
+  }
+
+  function ensureStatus(){
+    let el = document.getElementById(STATUS_ID);
+    if(el) return el;
+    el = document.createElement("div");
+    el.id = STATUS_ID;
+    el.style.position = "fixed";
+    el.style.right = "14px";
+    el.style.bottom = "14px";
+    el.style.zIndex = "99999";
+    el.style.padding = "8px 12px";
+    el.style.borderRadius = "999px";
+    el.style.fontSize = "12px";
+    el.style.fontWeight = "800";
+    el.style.border = "1px solid #22305f";
+    el.style.background = "rgba(10,16,32,.92)";
+    el.style.color = "#e8ecff";
+    el.style.boxShadow = "0 10px 30px rgba(0,0,0,.25)";
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function setStatus(text, mode){
+    const el = ensureStatus();
+    el.textContent = text || "Pret";
+    el.style.borderColor =
+      mode === "ok" ? "rgba(38,208,124,.55)" :
+      mode === "bad" ? "rgba(255,77,77,.55)" :
+      mode === "warn" ? "rgba(255,204,0,.55)" :
+      "rgba(34,48,95,.9)";
+    el.style.color =
+      mode === "ok" ? "#c9ffe6" :
+      mode === "bad" ? "#ffd1d1" :
+      mode === "warn" ? "#fff1b8" :
+      "#e8ecff";
+  }
+  window.setStatus = setStatus;
+
+  function jsonp(url, timeoutMs){
+    timeoutMs = timeoutMs || 12000;
+    return new Promise(function(resolve, reject){
+      const cb = "cb_" + Math.random().toString(16).slice(2) + "_" + Date.now();
+      const script = document.createElement("script");
+      let done = false;
+
+      const timer = setTimeout(function(){
+        if(done) return;
+        done = true;
+        cleanup();
+        reject(new Error("JSONP timeout"));
+      }, timeoutMs);
+
+      function cleanup(){
+        clearTimeout(timer);
+        try{ delete window[cb]; }catch(e){ window[cb] = undefined; }
+        if(script.parentNode) script.parentNode.removeChild(script);
+      }
+
+      window[cb] = function(data){
+        if(done) return;
+        done = true;
+        cleanup();
+        resolve(data);
+      };
+
+      script.onerror = function(){
+        if(done) return;
+        done = true;
+        cleanup();
+        reject(new Error("JSONP error"));
+      };
+
+      const sep = url.indexOf("?") >= 0 ? "&" : "?";
+      script.src = url + sep + "callback=" + encodeURIComponent(cb);
+      document.body.appendChild(script);
+    });
+  }
+
+  function saveServerForm(dataObj){
+    return new Promise(function(resolve){
+      const frame = document.querySelector('iframe[name="saveFrameFinal"]');
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = API_URL;
+      form.target = "saveFrameFinal";
+      form.style.display = "none";
+
+      const pass = document.createElement("input");
+      pass.type = "hidden";
+      pass.name = "password";
+      pass.value = window.APP_PASSWORD || "";
+
+      const payload = document.createElement("input");
+      payload.type = "hidden";
+      payload.name = "data";
+      payload.value = JSON.stringify(dataObj || {});
+
+      form.appendChild(pass);
+      form.appendChild(payload);
+      document.body.appendChild(form);
+
+      let done = false;
+      const finish = function(){
+        if(done) return;
+        done = true;
+        try{ form.remove(); }catch(e){}
+        resolve(true);
+      };
+
+      if(frame){
+        const onload = function(){
+          frame.removeEventListener("load", onload);
+          setTimeout(finish, 50);
+        };
+        frame.addEventListener("load", onload);
+      }
+
+      form.submit();
+      setTimeout(finish, 1200);
+    });
+  }
+
+  async function loadRemoteState(password){
+    const data = await jsonp(API_URL + "?password=" + encodeURIComponent(password));
+    if(data && data.error) throw new Error(data.error);
+    return data || {};
+  }
+
+  window.checkPassword = async function(){
+    const inputEl = document.getElementById("appPassword");
+    const errorEl = document.getElementById("loginError");
+    const input = (inputEl && inputEl.value ? inputEl.value : "").trim();
+
+    if(errorEl) errorEl.textContent = "";
+    if(!input){
+      if(errorEl) errorEl.textContent = "Mot de passe requis";
+      return;
+    }
+
+    setStatus("Connexion...", "");
+    try{
+      const data = await loadRemoteState(input);
+      window.APP_PASSWORD = input;
+      syncState(typeof normalizeState === "function" ? normalizeState(data) : data);
+
+      try{
+        localStorage.setItem(LS_KEY, JSON.stringify(getCurrentState()));
+      }catch(e){}
+
+      const login = document.getElementById("loginScreen");
+      if(login) login.style.display = "none";
+
+      if(typeof renderAll === "function") renderAll();
+      setStatus("Connecte", "ok");
+    }catch(e){
+      console.error("checkPassword failed", e);
+      if(errorEl) errorEl.textContent = "Erreur connexion serveur";
+      setStatus("Erreur connexion", "bad");
+    }
+  };
+
+  async function doSaveNow(){
+    const currentState = getCurrentState();
+
+    try{
+      localStorage.setItem(LS_KEY, JSON.stringify(currentState));
+    }catch(e){}
+
+    if(!window.APP_PASSWORD){
+      setStatus("Sauvegarde locale", "warn");
+      return false;
+    }
+
+    setStatus("Sauvegarde...", "");
+    try{
+      await saveServerForm(currentState);
+      setStatus("Sauvegarde envoyee", "ok");
+      return true;
+    }catch(e){
+      console.error("save failed", e);
+      setStatus("Sauvegarde locale seulement", "warn");
+      return false;
+    }
+  }
+
+  window.saveStateAsync = doSaveNow;
+
+  window.saveState = function(){
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(doSaveNow, 300);
+  };
+
+  document.addEventListener("DOMContentLoaded", function(){
+    const pw = document.getElementById("appPassword");
+    if(pw && pw.dataset.boundFinalStable !== "1"){
+      pw.dataset.boundFinalStable = "1";
+      pw.addEventListener("keydown", function(e){
+        if(e.key === "Enter"){
+          e.preventDefault();
+          window.checkPassword();
+        }
+      });
+    }
+
+    const img = document.querySelector(".premium-banner-top img");
+    if(img){
+      img.onerror = function(){ this.style.display = "none"; };
+    }
+
+    try{
+      const raw = localStorage.getItem(LS_KEY);
+      if(raw){
+        syncState(JSON.parse(raw));
+      }
+    }catch(e){}
+
+    setStatus("Pret", "");
   });
 })();
 </script>
