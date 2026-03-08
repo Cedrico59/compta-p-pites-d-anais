@@ -3972,25 +3972,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // Override saveState (remote)
 async function saveStateAsync(){
-  const currentState = window.state || state;
-  if(!APP_PASSWORD || !currentState) return;
-
+  if(!APP_PASSWORD) return;
   try{
-    await fetch(API_URL,{
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({
-        password: APP_PASSWORD,
-        data: currentState
-      })
+    // ✅ on envoie en FORM (pas de CORS)
+    await postViaHiddenForm(API_URL, {
+      password: APP_PASSWORD,
+      data: JSON.stringify(state)
     });
-
-    console.log("Sauvegarde Google Sheets OK");
-    if(typeof setStatusMain === "function"){ setStatusMain("Sauvegarde OK","ok"); }
-
   }catch(e){
-    console.error("Erreur sauvegarde serveur",e);
-    if(typeof setStatusMain === "function"){ setStatusMain("Sauvegarde locale seulement","warn"); }
+    console.warn("Sauvegarde distante impossible", e);
   }
 }
 
@@ -7166,50 +7156,48 @@ function exportDashboardCSV(){
     queueRemoteSave();
   };
 
-  window.checkPassword = async function(){
-    const inputEl = document.getElementById('appPassword');
-    const errorEl = document.getElementById('loginError');
-    const input = (inputEl?.value || '').trim();
-    if(errorEl) errorEl.textContent = '';
-    if(!input){
-      if(errorEl) errorEl.textContent = 'Mot de passe requis';
+  
+window.checkPassword = async function(){
+
+  const input = document.getElementById("appPassword").value.trim();
+  const error = document.getElementById("loginError");
+
+  if(error) error.textContent = "";
+
+  if(!input){
+    if(error) error.textContent = "Mot de passe requis";
+    return;
+  }
+
+  try{
+
+    const res = await fetch(API_URL + "?password=" + encodeURIComponent(input));
+    const data = await res.json();
+
+    if(data.error){
+      if(error) error.textContent = "Mot de passe incorrect";
       return;
     }
-    setStatusMain('Connexion...', '');
-    try{
-      const data = typeof jsonp === 'function'
-        ? await jsonp(API_URL + '?password=' + encodeURIComponent(input))
-        : await fetch(API_URL + '?password=' + encodeURIComponent(input)).then(r=>r.json());
-      if(data && data.error){
-        if(errorEl) errorEl.textContent = 'Mot de passe incorrect';
-        setStatusMain('Connexion refusee', 'bad');
-        return;
-      }
-      window.APP_PASSWORD = input;
-      window.state = normalizeStateFinal(data);
-      try{ localStorage.setItem(LS_KEY, JSON.stringify(window.state)); }catch(e){}
-      const login = document.getElementById('loginScreen');
-      if(login) login.style.display = 'none';
-      if(typeof renderAll === 'function') renderAll();
-      setStatusMain('Connecte', 'ok');
-    }catch(e){
-      console.warn('login failed', e);
-      try{
-        const cached = localStorage.getItem(LS_KEY);
-        if(cached){
-          window.APP_PASSWORD = input;
-          window.state = normalizeStateFinal(JSON.parse(cached));
-          const login = document.getElementById('loginScreen');
-          if(login) login.style.display = 'none';
-          if(typeof renderAll === 'function') renderAll();
-          setStatusMain('Mode hors ligne', '');
-          return;
-        }
-      }catch(_e){}
-      if(errorEl) errorEl.textContent = 'Erreur connexion serveur';
-      setStatusMain('Erreur connexion', 'bad');
+
+    window.APP_PASSWORD = input;
+    window.state = data;
+    try{ state = data }catch(e){}
+
+    localStorage.setItem(LS_KEY, JSON.stringify(data));
+
+    const login = document.getElementById("loginScreen");
+    if(login) login.style.display = "none";
+
+    if(typeof renderAll === "function"){
+      renderAll();
     }
-  };
+
+  }catch(e){
+    console.error(e);
+    if(error) error.textContent = "Erreur connexion serveur";
+  }
+};
+
 
   window.removeDraftLine = function(idx){
     try{
