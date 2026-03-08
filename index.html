@@ -2067,7 +2067,6 @@ function saveState(){
   saveStateAsync();
 }
 let state = loadState();
-window.state = state;
 
 // ✅ Corbeille: init
 if(!state.trashSales) state.trashSales = [];
@@ -3973,38 +3972,31 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // Override saveState (remote)
 async function saveStateAsync(){
-  if(!APP_PASSWORD) return false;
+  const currentState = window.state || state;
+  if(!APP_PASSWORD || !currentState) return;
+
   try{
-    window.state = state;
-    const payload = JSON.stringify(state);
-    await postViaHiddenForm(API_URL, {
-      password: APP_PASSWORD,
-      data: payload
+    await fetch(API_URL,{
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({
+        password: APP_PASSWORD,
+        data: currentState
+      })
     });
-    // Vérification légère côté serveur
-    try{
-      const remote = await jsonp(API_URL + "?password=" + encodeURIComponent(APP_PASSWORD), 12000);
-      const remoteJson = JSON.stringify(normalizeState(remote || {}));
-      const localJson = JSON.stringify(normalizeState(state || {}));
-      if(remoteJson !== localJson){
-        console.warn("Sauvegarde distante non confirmée");
-        return false;
-      }
-    }catch(_e){
-      // La vérification peut échouer même si le POST a réussi; on garde un warning seulement.
-      console.warn("Verification distante impossible", _e);
-    }
-    return true;
+
+    console.log("Sauvegarde Google Sheets OK");
+    if(typeof setStatusMain === "function"){ setStatusMain("Sauvegarde OK","ok"); }
+
   }catch(e){
-    console.warn("Sauvegarde distante impossible", e);
-    return false;
+    console.error("Erreur sauvegarde serveur",e);
+    if(typeof setStatusMain === "function"){ setStatusMain("Sauvegarde locale seulement","warn"); }
   }
 }
 
-async function saveState(){
-  window.state = state;
+function saveState(){
   try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){}
-  return await saveStateAsync();
+  saveStateAsync();
 }
 function jsonp(url, timeoutMs=12000){
   return new Promise((resolve, reject)=>{
@@ -4082,7 +4074,7 @@ function postViaHiddenForm(url, fields){
 }
 // Login check
 async function checkPassword(){
-  const input = (document.getElementById("appPassword").value || "").trim();
+  const input = document.getElementById("appPassword").value;
 
   try{
     const data = await jsonp(API_URL + "?password=" + encodeURIComponent(input));
@@ -4093,9 +4085,7 @@ async function checkPassword(){
     }
 
     APP_PASSWORD = input;
-    window.APP_PASSWORD = input;
     state = normalizeState(data);
-    window.state = state;
 
     // ✅ cache local (important)
     try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){}
@@ -4107,9 +4097,7 @@ async function checkPassword(){
     // fallback cache local
     if(__cachedState){
       APP_PASSWORD = input;
-      window.APP_PASSWORD = input;
       state = normalizeState(__cachedState);
-      window.state = state;
       document.getElementById("loginScreen").style.display = "none";
       renderAll();
       alert("Mode hors-ligne : données chargées depuis le cache local.");
@@ -7064,10 +7052,16 @@ function exportDashboardCSV(){
 </script>
 
 
-
 <script>
 (function(){
   const STATUS_ID = 'syncStatusFinal';
+  let saveTimer = null;
+  let saveInFlight = false;
+
+  function cloneSafe(v){
+    try{ return structuredClone(v); }catch(e){ return JSON.parse(JSON.stringify(v)); }
+  }
+
   function ensureStatusNode(){
     let el = document.getElementById(STATUS_ID);
     if(el) return el;
@@ -7084,52 +7078,202 @@ function exportDashboardCSV(){
     el.style.border = '1px solid #22305f';
     el.style.background = 'rgba(10,16,32,.92)';
     el.style.color = '#e8ecff';
+    el.style.boxShadow = '0 10px 30px rgba(0,0,0,.25)';
     document.body.appendChild(el);
     return el;
   }
-  function setStatus(text, mode){
+
+  function setStatusMain(text, mode){
     const el = ensureStatusNode();
     el.textContent = text || 'Pret';
     el.style.borderColor = mode === 'ok' ? 'rgba(38,208,124,.55)' : mode === 'bad' ? 'rgba(255,77,77,.55)' : 'rgba(34,48,95,.9)';
     el.style.color = mode === 'ok' ? '#c9ffe6' : mode === 'bad' ? '#ffd1d1' : '#e8ecff';
   }
+  window.setStatus = setStatusMain;
+
+  function normalizeStateFinal(data){
+    const d = (data && typeof data === 'object') ? data : {};
+    const base = cloneSafe(typeof defaultState !== 'undefined' ? defaultState : {
+      settings: { platformFees:{ MAGASIN:0, WHATNOT:0.08, VINTED:0 }, corporateTax:0.30, urssafBase:'NET_AFTER_PLATFORM', seller:{name:'', address:'', siret:'', vat:''} },
+      catalog: { clothingTypes: [], brands: [] },
+      inventory: {}, sales: [], supplierOrders: [], fraisGeneraux: [], trashSales: []
+    });
+
+    const s = d.settings || {};
+    base.settings = {
+      ...base.settings,
+      ...s,
+      platformFees: { ...(base.settings.platformFees||{}), ...((s.platformFees)||{}) },
+      seller: { ...(base.settings.seller||{}), ...((s.seller)||{}) }
+    };
+
+    const c = d.catalog || {};
+    base.catalog = {
+      ...base.catalog,
+      ...c,
+      clothingTypes: Array.isArray(c.clothingTypes) ? c.clothingTypes.slice() : (base.catalog.clothingTypes||[]).slice(),
+      brands: Array.isArray(c.brands) ? c.brands.slice() : (base.catalog.brands||[]).slice()
+    };
+
+    base.inventory = (d.inventory && typeof d.inventory === 'object') ? d.inventory : {};
+    base.sales = Array.isArray(d.sales) ? d.sales : [];
+    base.supplierOrders = Array.isArray(d.supplierOrders) ? d.supplierOrders : [];
+    base.fraisGeneraux = Array.isArray(d.fraisGeneraux) ? d.fraisGeneraux : [];
+    base.trashSales = Array.isArray(d.trashSales) ? d.trashSales : [];
+    return base;
+  }
+  window.normalizeState = normalizeStateFinal;
+
+  window.loadState = function(){
+    try{
+      const raw = localStorage.getItem(LS_KEY);
+      if(!raw) return normalizeStateFinal(cloneSafe(defaultState));
+      return normalizeStateFinal(JSON.parse(raw));
+    }catch(e){
+      console.warn('loadState fallback', e);
+      return normalizeStateFinal(cloneSafe(defaultState));
+    }
+  };
+
+  function queueRemoteSave(){
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(async ()=>{
+      if(saveInFlight) return;
+      if(!window.APP_PASSWORD) return;
+      saveInFlight = true;
+      setStatusMain('Sauvegarde...', '');
+      try{
+        if(typeof postViaHiddenForm === 'function'){
+          await postViaHiddenForm(API_URL, { password: APP_PASSWORD, data: JSON.stringify(window.state || {}) });
+        }
+        setStatusMain('Sauvegarde OK', 'ok');
+      }catch(e){
+        console.warn('save remote failed', e);
+        setStatusMain('Sauvegarde locale uniquement', 'bad');
+      }finally{
+        saveInFlight = false;
+      }
+    }, 400);
+  }
+
+  window.saveStateAsync = async function(){
+    queueRemoteSave();
+    return true;
+  };
+
+  window.saveState = function(opts){
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(window.state || {})); }catch(e){ console.warn('save local failed', e); }
+    queueRemoteSave();
+  };
+
+  window.checkPassword = async function(){
+    const inputEl = document.getElementById('appPassword');
+    const errorEl = document.getElementById('loginError');
+    const input = (inputEl?.value || '').trim();
+    if(errorEl) errorEl.textContent = '';
+    if(!input){
+      if(errorEl) errorEl.textContent = 'Mot de passe requis';
+      return;
+    }
+    setStatusMain('Connexion...', '');
+    try{
+      const data = typeof jsonp === 'function'
+        ? await jsonp(API_URL + '?password=' + encodeURIComponent(input))
+        : await fetch(API_URL + '?password=' + encodeURIComponent(input)).then(r=>r.json());
+      if(data && data.error){
+        if(errorEl) errorEl.textContent = 'Mot de passe incorrect';
+        setStatusMain('Connexion refusee', 'bad');
+        return;
+      }
+      window.APP_PASSWORD = input;
+      window.state = normalizeStateFinal(data);
+      try{ localStorage.setItem(LS_KEY, JSON.stringify(window.state)); }catch(e){}
+      const login = document.getElementById('loginScreen');
+      if(login) login.style.display = 'none';
+      if(typeof renderAll === 'function') renderAll();
+      setStatusMain('Connecte', 'ok');
+    }catch(e){
+      console.warn('login failed', e);
+      try{
+        const cached = localStorage.getItem(LS_KEY);
+        if(cached){
+          window.APP_PASSWORD = input;
+          window.state = normalizeStateFinal(JSON.parse(cached));
+          const login = document.getElementById('loginScreen');
+          if(login) login.style.display = 'none';
+          if(typeof renderAll === 'function') renderAll();
+          setStatusMain('Mode hors ligne', '');
+          return;
+        }
+      }catch(_e){}
+      if(errorEl) errorEl.textContent = 'Erreur connexion serveur';
+      setStatusMain('Erreur connexion', 'bad');
+    }
+  };
+
+  window.removeDraftLine = function(idx){
+    try{
+      if(!Array.isArray(window.saleDraftLines)) return;
+      window.saleDraftLines.splice(idx,1);
+      if(typeof renderAll === 'function') renderAll();
+    }catch(e){ console.warn('removeDraftLine failed', e); }
+  };
+
+  window.markPOReceived = function(id, addToStock){
+    const po = (window.state?.supplierOrders || []).find(o => o.id === id);
+    if(!po) return;
+    po.status = 'RECU';
+    po.receivedAt = (typeof todayISO === 'function') ? todayISO() : new Date().toISOString().slice(0,10);
+    if(addToStock){
+      for(const l of (po.lines || [])){
+        const lot = String(l.lot || '').trim();
+        const k = (typeof invKey === 'function')
+          ? invKey(l.clothingType, l.brand, l.segment, l.grade, lot)
+          : [l.clothingType, l.brand, l.segment, l.grade, lot].join('|');
+        const cur = window.state.inventory[k] || { qty:0, minQty:0, buyPrice:0, lot, supplierRef:'', info:'' };
+        const qty = Number(l.qty) || 0;
+        const unitCost = Number(l.unitCost) || 0;
+        window.state.inventory[k] = {
+          ...cur,
+          qty: Math.max(0, (Number(cur.qty) || 0) + qty),
+          buyPrice: unitCost > 0 ? unitCost : (Number(cur.buyPrice) || 0),
+          lot,
+          supplierRef: cur.supplierRef || po.supplier || '',
+          info: cur.info || po.notes || ''
+        };
+      }
+    }
+    window.saveState({ immediate:true });
+  };
+
+  window.receivePO = function(id){
+    const add = window.confirm('Ajouter automatiquement les quantites au stock ?\nOK = Oui (ajouter)\nAnnuler = Non (juste marquer recu)');
+    window.markPOReceived(id, add);
+    if(typeof renderAll === 'function') renderAll();
+  };
+
   function attachEnterLogin(){
     const pw = document.getElementById('appPassword');
-    if(!pw || pw.dataset.boundEnterStable === '1') return;
-    pw.dataset.boundEnterStable = '1';
+    if(!pw || pw.dataset.boundEnter === '1') return;
+    pw.dataset.boundEnter = '1';
     pw.addEventListener('keydown', (e)=>{
       if(e.key === 'Enter'){
         e.preventDefault();
-        if(typeof checkPassword === 'function') checkPassword();
+        window.checkPassword();
       }
     });
   }
+
   function hideMissingLogo(){
     const img = document.querySelector('.premium-banner-top img');
     if(img){ img.onerror = function(){ this.style.display='none'; }; }
   }
-  const originalCheck = window.checkPassword;
-  if(typeof originalCheck === 'function'){
-    window.checkPassword = async function(){
-      setStatus('Connexion...', '');
-      const out = await originalCheck.apply(this, arguments);
-      if(window.APP_PASSWORD){ setStatus('Connecte', 'ok'); }
-      return out;
-    };
-  }
-  const originalSave = window.saveState;
-  if(typeof originalSave === 'function'){
-    window.saveState = async function(){
-      setStatus('Sauvegarde...', '');
-      const ok = await originalSave.apply(this, arguments);
-      setStatus(ok === false ? 'Sauvegarde non verifiee' : 'Sauvegarde verifiee', ok === false ? 'bad' : 'ok');
-      return ok;
-    };
-  }
+
   document.addEventListener('DOMContentLoaded', ()=>{
     attachEnterLogin();
     hideMissingLogo();
-    setStatus('Pret', '');
+    setStatusMain('Pret', '');
+    try{ window.state = normalizeStateFinal(window.state || window.loadState()); }catch(e){}
   });
 })();
 </script>
