@@ -7506,5 +7506,42 @@ function exportDashboardCSV(){
 })();
 </script>
 
+  <script>
+
+document.getElementById("btnImport").addEventListener("click", () => {
+
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".json";
+
+  input.onchange = async (e) => {
+
+    const file = e.target.files[0];
+    if(!file) return;
+
+    const text = await file.text();
+    const data = JSON.parse(text);
+
+    // charger dans l'app
+    state = normalizeState(data);
+    window.state = state;
+
+    // afficher
+    if(typeof renderAll === "function"){
+      renderAll();
+    }
+
+    // sauvegarder serveur
+    if(typeof saveState === "function"){
+      saveState();
+    }
+
+  };
+
+  input.click();
+
+});
+
+</script>
 </body>
 </html>
