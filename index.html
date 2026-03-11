@@ -7270,72 +7270,128 @@ function exportDashboardCSV(){
 
 
 
-<!-- CLEAN IMPORT PATCH -->
+
+<!-- FINAL STABLE PATCH -->
 <script>
 (function(){
+  function getState(){
+    try{
+      if (typeof state !== 'undefined' && state && typeof state === 'object') return state;
+    }catch(e){}
+    if (window.state && typeof window.state === 'object') return window.state;
+    return {};
+  }
+
+  function setState(next){
+    try{ state = next; }catch(e){}
+    window.state = next;
+    return next;
+  }
+
+  function saveLocalOnly(){
+    try{
+      const current = getState();
+      window.state = current;
+      localStorage.setItem(LS_KEY, JSON.stringify(current));
+      return true;
+    }catch(e){
+      console.warn('local save failed', e);
+      return false;
+    }
+  }
+
+  function loadLocalOnly(){
+    try{
+      const raw = localStorage.getItem(LS_KEY);
+      if(!raw) return null;
+      const parsed = JSON.parse(raw);
+      setState(parsed);
+      return parsed;
+    }catch(e){
+      console.warn('local load failed', e);
+      return null;
+    }
+  }
+
+  const origSave = window.saveState || (typeof saveState === 'function' ? saveState : null);
+  window.saveState = function(opts){
+    saveLocalOnly();
+    try{
+      const current = getState();
+      setState(current);
+    }catch(e){}
+    if(typeof origSave === 'function'){
+      try{ return origSave.call(this, opts); }catch(e){ console.warn('orig saveState failed', e); }
+    }
+    if(typeof window.saveStateAsync === 'function'){
+      try{ return window.saveStateAsync(opts); }catch(e){ console.warn('saveStateAsync failed', e); }
+    }
+  };
+
+  const origCheck = window.checkPassword || (typeof checkPassword === 'function' ? checkPassword : null);
+  if(typeof origCheck === 'function'){
+    window.checkPassword = async function(){
+      const result = await origCheck.apply(this, arguments);
+      try{ saveLocalOnly(); }catch(e){}
+      return result;
+    };
+  }
+
   function normalizeImported(data){
+    let d = data || {};
     try{
-      if(typeof normalizeStateFinal === "function") return normalizeStateFinal(data);
-    }catch(e){}
-    try{
-      if(typeof normalizeState === "function") return normalizeState(data);
-    }catch(e){}
-    return data || {};
+      if(typeof normalizeStateFinal === 'function') d = normalizeStateFinal(d);
+      else if(typeof normalizeState === 'function') d = normalizeState(d);
+    }catch(e){ console.warn('normalize import failed', e); }
+    return d;
   }
 
   function bindImportButton(){
-    const oldBtn = document.getElementById("btnImport");
+    const oldBtn = document.getElementById('btnImport');
     if(!oldBtn || !oldBtn.parentNode) return;
-    if(oldBtn.dataset.cleanImportBound === "1") return;
+    if(oldBtn.dataset.finalImportBound === '1') return;
 
     const btn = oldBtn.cloneNode(true);
-    btn.dataset.cleanImportBound = "1";
+    btn.dataset.finalImportBound = '1';
     oldBtn.parentNode.replaceChild(btn, oldBtn);
 
-    btn.addEventListener("click", function(ev){
+    btn.addEventListener('click', function(ev){
       ev.preventDefault();
-
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".json,application/json";
-
-      input.onchange = async function(e){
-        const file = e.target.files && e.target.files[0];
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json,application/json';
+      input.onchange = async function(){
+        const file = input.files && input.files[0];
         if(!file) return;
-
         try{
           const text = await file.text();
-          const raw = JSON.parse(text);
-          const imported = normalizeImported(raw);
-
-          try{ state = imported; }catch(e){}
-          window.state = imported;
-
-          try{ localStorage.setItem(LS_KEY, JSON.stringify(imported)); }catch(e){}
-
-          if(typeof renderAll === "function") renderAll();
-          try{ if(typeof refreshLotOptions === "function") refreshLotOptions(); }catch(e){}
-          try{ if(typeof updateStockForSelectedLot === "function") updateStockForSelectedLot(); }catch(e){}
-
-          if(typeof window.saveState === "function"){
-            const result = window.saveState();
-            if(result && typeof result.then === "function"){ await result; }
-          }
-
-          alert("Import terminé et sauvegardé.");
+          const parsed = JSON.parse(text);
+          const imported = normalizeImported(parsed);
+          setState(imported);
+          saveLocalOnly();
+          if(typeof renderAll === 'function') renderAll();
+          try{ if(typeof refreshLotOptions === 'function') refreshLotOptions(); }catch(e){}
+          try{ if(typeof updateStockForSelectedLot === 'function') updateStockForSelectedLot(); }catch(e){}
+          try{
+            const r = window.saveState({ immediate:true });
+            if(r && typeof r.then === 'function') await r;
+          }catch(e){ console.warn('remote save after import failed', e); }
+          alert('Import terminé et sauvegardé.');
         }catch(err){
-          console.error("Import JSON failed", err);
-          alert("Erreur import JSON : " + (err && err.message ? err.message : err));
+          console.error('Import JSON failed', err);
+          alert('Erreur import JSON : ' + (err && err.message ? err.message : err));
         }
       };
-
       input.click();
     });
   }
 
-  document.addEventListener("DOMContentLoaded", bindImportButton);
+  document.addEventListener('DOMContentLoaded', function(){
+    loadLocalOnly();
+    bindImportButton();
+    try{ if(typeof renderAll === 'function') renderAll(); }catch(e){}
+  });
 })();
 </script>
-
 </body>
 </html>
