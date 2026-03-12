@@ -7440,5 +7440,217 @@ window.saveState = function(opts){
   });
 })();
 </script>
+
+<!-- PRO CLEAN SAVE PATCH -->
+<script>
+(function(){
+  let saveTimer = null;
+  let saveBusy = false;
+
+  function getCurrentState(){
+    try{
+      if(typeof state !== "undefined" && state) return state;
+    }catch(e){}
+    return (window.state && typeof window.state === "object") ? window.state : {};
+  }
+
+  function syncStateRefs(next){
+    const s = next || getCurrentState() || {};
+    try{ state = s; }catch(e){}
+    window.state = s;
+    return s;
+  }
+
+  function saveLocalOnly(){
+    try{
+      const s = syncStateRefs();
+      localStorage.setItem(LS_KEY, JSON.stringify(s));
+    }catch(e){
+      console.warn("local save failed", e);
+    }
+  }
+
+  function setMiniStatus(text){
+    let el = document.getElementById("miniSyncStatus");
+    if(!el){
+      el = document.createElement("div");
+      el.id = "miniSyncStatus";
+      el.style.position = "fixed";
+      el.style.right = "14px";
+      el.style.bottom = "14px";
+      el.style.zIndex = "99999";
+      el.style.padding = "8px 12px";
+      el.style.borderRadius = "999px";
+      el.style.fontSize = "12px";
+      el.style.fontWeight = "800";
+      el.style.border = "1px solid #22305f";
+      el.style.background = "rgba(10,16,32,.92)";
+      el.style.color = "#e8ecff";
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+  }
+
+  function normalizeImported(data){
+    let d = data;
+    try{
+      if(typeof normalizeStateFinal === "function") d = normalizeStateFinal(d);
+      else if(typeof normalizeState === "function") d = normalizeState(d);
+    }catch(e){}
+    if(!d || typeof d !== "object") d = {};
+    if(!d.settings) d.settings = {};
+    if(!d.catalog) d.catalog = { clothingTypes: [], brands: [] };
+    if(!d.inventory || typeof d.inventory !== "object") d.inventory = {};
+    if(!Array.isArray(d.sales)) d.sales = [];
+    if(!Array.isArray(d.supplierOrders)) d.supplierOrders = [];
+    if(!Array.isArray(d.fraisGeneraux)) d.fraisGeneraux = [];
+    if(!Array.isArray(d.trashSales)) d.trashSales = [];
+    return d;
+  }
+
+  function postViaHiddenFormStable(url, fields){
+    return new Promise((resolve)=>{
+      const iframeName = "hidden_iframe_stable_" + Date.now();
+      const iframe = document.createElement("iframe");
+      iframe.name = iframeName;
+      iframe.style.display = "none";
+
+      const form = document.createElement("form");
+      form.action = url;
+      form.method = "POST";
+      form.target = iframeName;
+      form.style.display = "none";
+
+      Object.entries(fields || {}).forEach(([k,v])=>{
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = k;
+        input.value = String(v ?? "");
+        form.appendChild(input);
+      });
+
+      document.body.appendChild(iframe);
+      document.body.appendChild(form);
+
+      let done = false;
+      const finish = () => {
+        if(done) return;
+        done = true;
+        try{ form.remove(); }catch(e){}
+        try{ iframe.remove(); }catch(e){}
+        resolve(true);
+      };
+
+      iframe.addEventListener("load", ()=>setTimeout(finish, 60), { once:true });
+      form.submit();
+      setTimeout(finish, 1200);
+    });
+  }
+
+  async function remoteSaveNow(){
+    if(saveBusy) return false;
+    if(!window.APP_PASSWORD) return false;
+    saveBusy = true;
+    setMiniStatus("Sauvegarde...");
+    try{
+      const s = syncStateRefs();
+      const payload = JSON.stringify(s);
+      if(typeof postViaHiddenForm === "function"){
+        await postViaHiddenForm(API_URL, { password: window.APP_PASSWORD, data: payload });
+      }else{
+        await postViaHiddenFormStable(API_URL, { password: window.APP_PASSWORD, data: payload });
+      }
+      setMiniStatus("Sauvegarde OK");
+      return true;
+    }catch(e){
+      console.warn("remote save failed", e);
+      setMiniStatus("Sauvegarde locale");
+      return false;
+    }finally{
+      saveBusy = false;
+    }
+  }
+
+  function queueRemoteSave(){
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(remoteSaveNow, 400);
+  }
+
+  const origCheck = window.checkPassword || (typeof checkPassword === "function" ? checkPassword : null);
+  if(typeof origCheck === "function"){
+    window.checkPassword = async function(){
+      const result = await origCheck.apply(this, arguments);
+      try{
+        syncStateRefs(getCurrentState());
+        saveLocalOnly();
+      }catch(e){}
+      return result;
+    };
+  }
+
+  window.saveStateAsync = async function(){
+    saveLocalOnly();
+    return remoteSaveNow();
+  };
+
+  window.saveState = function(opts){
+    saveLocalOnly();
+    queueRemoteSave();
+    return true;
+  };
+
+  function bindImport(){
+    const btn = document.getElementById("btnImport");
+    if(!btn || btn.dataset.proImportBound === "1") return;
+    btn.dataset.proImportBound = "1";
+
+    btn.addEventListener("click", function(){
+      setTimeout(function(){
+        const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
+        const input = inputs[inputs.length - 1];
+        if(!input || input.dataset.proWatched === "1") return;
+        input.dataset.proWatched = "1";
+
+        input.addEventListener("change", async function(e){
+          const file = e.target.files && e.target.files[0];
+          if(!file) return;
+          try{
+            const text = await file.text();
+            const raw = JSON.parse(text);
+            const imported = normalizeImported(raw);
+            syncStateRefs(imported);
+            saveLocalOnly();
+            if(typeof renderAll === "function") renderAll();
+            try{ if(typeof refreshLotOptions === "function") refreshLotOptions(); }catch(e){}
+            try{ if(typeof updateStockForSelectedLot === "function") updateStockForSelectedLot(); }catch(e){}
+            await remoteSaveNow();
+            alert("Import terminé et sauvegardé.");
+          }catch(err){
+            console.error("Import JSON failed", err);
+            alert("Erreur import JSON : " + (err && err.message ? err.message : err));
+          }
+        }, { once:true });
+      }, 50);
+    }, true);
+  }
+
+  document.addEventListener("DOMContentLoaded", function(){
+    try{
+      const raw = localStorage.getItem(LS_KEY);
+      if(raw){
+        const parsed = JSON.parse(raw);
+        syncStateRefs(normalizeImported(parsed));
+      }
+    }catch(e){}
+    bindImport();
+    setMiniStatus("Prêt");
+  });
+
+  window.addEventListener("beforeunload", function(){
+    saveLocalOnly();
+  });
+})();
+</script>
+
 </body>
 </html>
