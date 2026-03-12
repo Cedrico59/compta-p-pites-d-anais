@@ -3979,10 +3979,10 @@ async function saveStateAsync(){
 
     const payload = JSON.stringify(window.state || state || {});
 
-    await postViaHiddenForm(API_URL,{
-      password: APP_PASSWORD,
-      data: payload
-    });
+    await postViaHiddenForm(API_URL, {
+  password: APP_PASSWORD,
+  data: JSON.stringify(window.state || state || {})
+});
 
   }catch(e){
 
@@ -7182,10 +7182,26 @@ function exportDashboardCSV(){
     return true;
   };
 
-  window.saveState = function(opts){
-    try{ localStorage.setItem(LS_KEY, JSON.stringify(window.state || {})); }catch(e){ console.warn('save local failed', e); }
-    queueRemoteSave();
-  };
+window.saveState = function(opts){
+
+  try{
+    if(typeof state !== "undefined"){
+      window.state = state;
+    }
+  }catch(e){}
+
+  try{
+    localStorage.setItem(
+      LS_KEY,
+      JSON.stringify(window.state || state || {})
+    );
+  }catch(e){
+    console.warn('save local failed', e);
+  }
+
+  queueRemoteSave();
+
+};
 
   window.checkPassword = async function(){
     const inputEl = document.getElementById('appPassword');
