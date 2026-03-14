@@ -3972,34 +3972,30 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // Override saveState (remote)
 async function saveStateAsync(){
+  const currentState = window.state || state || {};
+  const currentPassword = window.APP_PASSWORD || APP_PASSWORD || "";
 
-  if(!APP_PASSWORD) return;
-
-  try{
-
-    const payload = JSON.stringify(window.state || state || {});
-
-    await postViaHiddenForm(API_URL, {
-  password: APP_PASSWORD,
-  data: JSON.stringify(window.state || state || {})
-});
-
-  }catch(e){
-
-    console.warn("Sauvegarde distante impossible",e);
-
+  if(!currentPassword) {
+    console.warn("Aucun mot de passe pour la sauvegarde distante");
+    return;
   }
 
+  try{
+    await postViaHiddenForm(API_URL, {
+      password: currentPassword,
+      data: JSON.stringify(currentState)
+    });
+    console.log("Sauvegarde distante envoyée");
+  }catch(e){
+    console.warn("Sauvegarde distante impossible", e);
+  }
 }
 
 function saveState(){
-
-  // synchronise state et window.state
   try{
     window.state = state;
   }catch(e){}
 
-  // sauvegarde locale
   try{
     localStorage.setItem(
       LS_KEY,
@@ -4007,10 +4003,9 @@ function saveState(){
     );
   }catch(e){}
 
-  // sauvegarde Google Sheet
   saveStateAsync();
-
 }
+
 function syncState(){
 
   try{
@@ -4095,7 +4090,7 @@ function postViaHiddenForm(url, fields){
 }
 // Login check
 async function checkPassword(){
-  const input = document.getElementById("appPassword").value;
+  const input = document.getElementById("appPassword").value.trim();
 
   try{
     const data = await jsonp(API_URL + "?password=" + encodeURIComponent(input));
@@ -4105,20 +4100,27 @@ async function checkPassword(){
       return;
     }
 
+    window.APP_PASSWORD = input;
     APP_PASSWORD = input;
-    state = normalizeState(data);
 
-    // ✅ cache local (important)
-    try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){}
+    state = normalizeState(data);
+    window.state = state;
+
+    try{
+      localStorage.setItem(LS_KEY, JSON.stringify(window.state));
+    }catch(e){}
 
     document.getElementById("loginScreen").style.display = "none";
     renderAll();
 
   }catch(e){
-    // fallback cache local
     if(__cachedState){
+      window.APP_PASSWORD = input;
       APP_PASSWORD = input;
+
       state = normalizeState(__cachedState);
+      window.state = state;
+
       document.getElementById("loginScreen").style.display = "none";
       renderAll();
       alert("Mode hors-ligne : données chargées depuis le cache local.");
