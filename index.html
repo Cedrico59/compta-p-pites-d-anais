@@ -3972,7 +3972,33 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // Override saveState (remote)
 async function saveStateAsync(){
+
   const currentState = window.state || state || {};
+  const currentPassword = window.APP_PASSWORD || APP_PASSWORD || "";
+
+  if(!currentPassword) return;
+
+  try{
+    await fetch(API_URL,{
+      method:"POST",
+      mode:"no-cors",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        password: currentPassword,
+        data: currentState
+      })
+    });
+
+    console.log("Sauvegarde Google Sheet envoyée");
+
+  }catch(e){
+    console.warn("Erreur sauvegarde distante",e);
+  }
+
+}
+;
   const currentPassword = window.APP_PASSWORD || APP_PASSWORD || "";
 
   if(!currentPassword) {
@@ -3989,7 +4015,7 @@ async function saveStateAsync(){
   }catch(e){
     console.warn("Sauvegarde distante impossible", e);
   }
-}
+
 
 function saveState(){
   try{
@@ -4055,16 +4081,20 @@ function jsonp(url, timeoutMs=12000){
 
 // POST via formulaire caché (pas de CORS)
 function postViaHiddenForm(url, fields){
+
   return new Promise((resolve)=>{
+
     const iframeName = "hidden_iframe_" + Date.now();
+
     const iframe = document.createElement("iframe");
     iframe.name = iframeName;
     iframe.style.display = "none";
 
     const form = document.createElement("form");
-    form.action = url;
     form.method = "POST";
+    form.action = url;
     form.target = iframeName;
+    form.style.display = "none";
 
     Object.entries(fields).forEach(([k,v])=>{
       const input = document.createElement("input");
@@ -4074,19 +4104,32 @@ function postViaHiddenForm(url, fields){
       form.appendChild(input);
     });
 
-    iframe.onload = ()=>{
-      // on ne peut pas lire la réponse (cross-domain), mais le POST est parti
-      setTimeout(()=>{
-        form.remove();
-        iframe.remove();
-        resolve(true);
-      }, 50);
-    };
-
     document.body.appendChild(iframe);
     document.body.appendChild(form);
+
+    let finished = false;
+
+    const cleanup = ()=>{
+      if(finished) return;
+      finished = true;
+
+      setTimeout(()=>{
+        try{ form.remove(); }catch(e){}
+        try{ iframe.remove(); }catch(e){}
+      },100);
+
+      resolve(true);
+    };
+
+    iframe.onload = cleanup;
+
     form.submit();
+
+    // sécurité si on ne reçoit jamais le load
+    setTimeout(cleanup,1500);
+
   });
+
 }
 // Login check
 async function checkPassword(){
