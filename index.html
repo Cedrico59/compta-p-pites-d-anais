@@ -3969,39 +3969,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // ================= GOOGLE AUTH MULTI POSTE =================
 
-
-// Override saveState (remote)
 async function saveStateAsync(){
-
   const currentState = window.state || state || {};
   const currentPassword = window.APP_PASSWORD || APP_PASSWORD || "";
 
-  if(!currentPassword) return;
-
-  try{
-    await fetch(API_URL,{
-      method:"POST",
-      mode:"no-cors",
-      headers:{
-        "Content-Type":"application/json"
-      },
-      body:JSON.stringify({
-        password: currentPassword,
-        data: currentState
-      })
-    });
-
-    console.log("Sauvegarde Google Sheet envoyée");
-
-  }catch(e){
-    console.warn("Erreur sauvegarde distante",e);
-  }
-
-}
-;
-  const currentPassword = window.APP_PASSWORD || APP_PASSWORD || "";
-
-  if(!currentPassword) {
+  if(!currentPassword){
     console.warn("Aucun mot de passe pour la sauvegarde distante");
     return;
   }
@@ -4015,7 +3987,7 @@ async function saveStateAsync(){
   }catch(e){
     console.warn("Sauvegarde distante impossible", e);
   }
-
+}
 
 function saveState(){
   try{
@@ -4033,11 +4005,9 @@ function saveState(){
 }
 
 function syncState(){
-
   try{
     window.state = state;
   }catch(e){}
-
 }
 
 function jsonp(url, timeoutMs=12000){
