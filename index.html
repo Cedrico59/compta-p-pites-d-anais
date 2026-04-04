@@ -3970,23 +3970,35 @@ document.addEventListener("DOMContentLoaded", () => {
 // ================= GOOGLE AUTH MULTI POSTE =================
 
 async function saveStateAsync(){
+
   const currentState = window.state || state || {};
   const currentPassword = window.APP_PASSWORD || APP_PASSWORD || "";
 
   if(!currentPassword){
-    console.warn("Aucun mot de passe pour la sauvegarde distante");
+    console.warn("Pas de mot de passe");
     return;
   }
 
   try{
-    await postViaHiddenForm(API_URL, {
-      password: currentPassword,
-      data: JSON.stringify(currentState)
+
+    const res = await fetch(API_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: {
+        "Content-Type": "text/plain"
+      },
+      body: JSON.stringify({
+        password: currentPassword,
+        data: currentState
+      })
     });
-    console.log("Sauvegarde distante envoyée");
+
+    console.log("SAVE SENT ✅");
+
   }catch(e){
-    console.warn("Sauvegarde distante impossible", e);
+    console.error("SAVE FAIL ❌", e);
   }
+
 }
 
 function saveState(){
