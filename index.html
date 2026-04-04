@@ -7679,5 +7679,93 @@ window.saveState = function(opts){
 })();
 </script>
 
+  <script>
+(function(){
+
+  function getCurrentState(){
+    try{
+      if(typeof state !== "undefined" && state) return state;
+    }catch(e){}
+    return window.state || {};
+  }
+
+  function syncStateRefs(){
+    const s = getCurrentState();
+    try{ state = s; }catch(e){}
+    window.state = s;
+    return s;
+  }
+
+  async function forceRemoteSave(){
+    const currentState = syncStateRefs();
+    const currentPassword = window.APP_PASSWORD || APP_PASSWORD || "";
+
+    console.log("DEBUG save password =", currentPassword);
+    console.log("DEBUG save state =", currentState);
+
+    if(!currentPassword){
+      console.warn("Aucun mot de passe pour la sauvegarde distante");
+      return false;
+    }
+
+    try{
+      await fetch(API_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: {
+          "Content-Type": "text/plain"
+        },
+        body: JSON.stringify({
+          password: currentPassword,
+          data: currentState
+        })
+      });
+
+      console.log("SAVE SENT ✅");
+      return true;
+
+    }catch(e){
+      console.error("SAVE FAIL ❌", e);
+      return false;
+    }
+  }
+
+  window.saveStateAsync = forceRemoteSave;
+
+  window.saveState = function(){
+    const currentState = syncStateRefs();
+
+    try{
+      localStorage.setItem(
+        LS_KEY,
+        JSON.stringify(currentState)
+      );
+    }catch(e){
+      console.warn("local save failed", e);
+    }
+
+    forceRemoteSave();
+  };
+
+  document.addEventListener("click", function(e){
+    const btn = e.target.closest("button");
+    if(!btn) return;
+
+    setTimeout(()=>{
+      window.saveState();
+    }, 300);
+  }, true);
+
+  document.addEventListener("input", function(e){
+    const tag = e.target && e.target.tagName;
+    if(tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"){
+      setTimeout(()=>{
+        window.saveState();
+      }, 500);
+    }
+  }, true);
+
+})();
+</script>
 </body>
 </html>
