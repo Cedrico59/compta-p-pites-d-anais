@@ -7678,8 +7678,7 @@ window.saveState = function(opts){
   });
 })();
 </script>
-
-  <script>
+<script>
 (function(){
 
   function getCurrentState(){
@@ -7767,5 +7766,239 @@ window.saveState = function(opts){
 
 })();
 </script>
+
+<!-- ULTRA PRO FINAL PATCH -->
+<script>
+(function(){
+  let remotePollTimer = null;
+  let autosaveTimer = null;
+  let saveInFlight = false;
+  let suppressRemoteUntil = 0;
+
+  function now(){ return Date.now(); }
+
+  function getLiveState(){
+    try{
+      if(typeof state !== "undefined" && state) return state;
+    }catch(e){}
+    return (window.state && typeof window.state === "object") ? window.state : {};
+  }
+
+  function setLiveState(next){
+    const s = next || {};
+    try{ state = s; }catch(e){}
+    window.state = s;
+    return s;
+  }
+
+  function serializeState(obj){
+    try{ return JSON.stringify(obj || {}); }
+    catch(e){ return "{}"; }
+  }
+
+  function saveLocalOnly(){
+    const s = setLiveState(getLiveState());
+    try{ localStorage.setItem(LS_KEY, serializeState(s)); }catch(e){}
+    return s;
+  }
+
+  function showUltraStatus(text){
+    let el = document.getElementById("ultraSyncStatus");
+    if(!el){
+      el = document.createElement("div");
+      el.id = "ultraSyncStatus";
+      el.style.position = "fixed";
+      el.style.right = "14px";
+      el.style.bottom = "14px";
+      el.style.zIndex = "99999";
+      el.style.padding = "8px 12px";
+      el.style.borderRadius = "999px";
+      el.style.fontSize = "12px";
+      el.style.fontWeight = "800";
+      el.style.border = "1px solid #22305f";
+      el.style.background = "rgba(10,16,32,.92)";
+      el.style.color = "#e8ecff";
+      document.body.appendChild(el);
+    }
+    el.textContent = text || "Prêt";
+  }
+
+  async function remoteSaveNow(){
+    if(saveInFlight) return false;
+
+    const pwd = window.APP_PASSWORD || APP_PASSWORD || "";
+    if(!pwd){
+      showUltraStatus("Local seulement");
+      return false;
+    }
+
+    saveInFlight = true;
+    try{
+      const live = saveLocalOnly();
+      const payload = {
+        password: pwd,
+        data: live
+      };
+
+      await fetch(API_URL,{
+        method:"POST",
+        mode:"no-cors",
+        headers:{ "Content-Type":"text/plain" },
+        body: JSON.stringify(payload)
+      });
+
+      suppressRemoteUntil = now() + 2500;
+      showUltraStatus("Sauvegarde envoyée");
+      return true;
+    }catch(e){
+      console.warn("remote save failed", e);
+      showUltraStatus("Sauvegarde locale");
+      return false;
+    }finally{
+      saveInFlight = false;
+    }
+  }
+
+  function queueSave(delay){
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(remoteSaveNow, delay || 600);
+  }
+
+  async function fetchRemoteState(){
+    const pwd = window.APP_PASSWORD || APP_PASSWORD || "";
+    if(!pwd) return null;
+
+    try{
+      if(typeof jsonp === "function"){
+        const data = await jsonp(API_URL + "?password=" + encodeURIComponent(pwd));
+        if(data && !data.error) return data;
+        return null;
+      }
+      const res = await fetch(API_URL + "?password=" + encodeURIComponent(pwd), { cache:"no-store" });
+      const data = await res.json();
+      if(data && !data.error) return data;
+      return null;
+    }catch(e){
+      return null;
+    }
+  }
+
+  async function remoteRefresh(){
+    if(now() < suppressRemoteUntil) return;
+    const remote = await fetchRemoteState();
+    if(!remote || typeof remote !== "object") return;
+
+    const current = getLiveState();
+    const remoteStr = serializeState(remote);
+    const currentStr = serializeState(current);
+
+    if(remoteStr !== currentStr){
+      setLiveState(remote);
+      try{ localStorage.setItem(LS_KEY, remoteStr); }catch(e){}
+      if(typeof renderAll === "function") renderAll();
+      showUltraStatus("Synchronisé");
+    }
+  }
+
+  window.commitState = function(reason){
+    const s = saveLocalOnly();
+    showUltraStatus(reason ? ("Sync " + reason) : "Sync");
+    queueSave(400);
+    return s;
+  };
+
+  const originalSaveState = window.saveState || (typeof saveState === "function" ? saveState : null);
+  window.saveState = function(opts){
+    saveLocalOnly();
+    queueSave(400);
+    if(typeof originalSaveState === "function" && originalSaveState !== window.saveState){
+      try{ return originalSaveState.call(this, opts); }catch(e){}
+    }
+    return true;
+  };
+
+  window.saveStateAsync = remoteSaveNow;
+
+  const originalCheckPassword = window.checkPassword || (typeof checkPassword === "function" ? checkPassword : null);
+  if(typeof originalCheckPassword === "function"){
+    window.checkPassword = async function(){
+      const result = await originalCheckPassword.apply(this, arguments);
+      try{
+        setLiveState(getLiveState());
+        saveLocalOnly();
+        clearInterval(remotePollTimer);
+        remotePollTimer = setInterval(remoteRefresh, 5000);
+      }catch(e){}
+      return result;
+    };
+  }
+
+  function bindImportFallback(){
+    const btn = document.getElementById("btnImport");
+    if(!btn || btn.dataset.ultraImportBound === "1") return;
+    btn.dataset.ultraImportBound = "1";
+
+    btn.addEventListener("click", function(){
+      setTimeout(function(){
+        const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
+        const input = inputs[inputs.length - 1];
+        if(!input || input.dataset.ultraWatched === "1") return;
+        input.dataset.ultraWatched = "1";
+
+        input.addEventListener("change", async function(e){
+          const file = e.target.files && e.target.files[0];
+          if(!file) return;
+          try{
+            const text = await file.text();
+            const raw = JSON.parse(text);
+            const imported = (typeof normalizeState === "function") ? normalizeState(raw) : raw;
+            setLiveState(imported);
+            saveLocalOnly();
+            if(typeof renderAll === "function") renderAll();
+            queueSave(100);
+            showUltraStatus("Import sauvegardé");
+          }catch(err){
+            console.warn("import fallback failed", err);
+          }
+        }, { once:true });
+      }, 50);
+    }, true);
+  }
+
+  document.addEventListener("input", function(e){
+    const t = e.target;
+    if(!t) return;
+    if(["INPUT","TEXTAREA","SELECT"].includes(t.tagName)){
+      saveLocalOnly();
+      queueSave(800);
+    }
+  }, true);
+
+  document.addEventListener("click", function(e){
+    const btn = e.target.closest && e.target.closest("button");
+    if(btn){
+      saveLocalOnly();
+      queueSave(900);
+    }
+  }, true);
+
+  window.addEventListener("beforeunload", function(){
+    saveLocalOnly();
+  });
+
+  document.addEventListener("DOMContentLoaded", function(){
+    try{
+      const raw = localStorage.getItem(LS_KEY);
+      if(raw){
+        const parsed = JSON.parse(raw);
+        setLiveState(parsed);
+      }
+    }catch(e){}
+    bindImportFallback();
+    showUltraStatus("Prêt");
+  });
+})();
+</script>
+
 </body>
 </html>
